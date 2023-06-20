@@ -1,0 +1,7 @@
+flask
+mysqlclient
+flask-sqlalchemy
+flask-Mail
+flask-MySQLdb
+flask_redis
+SQLAlchemy
