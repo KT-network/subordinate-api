@@ -65,6 +65,11 @@ def devices_type_add():
     return fun.devices_type_add_()
 
 
+# 修改设备名称
+@app.route('/devices/edit/name', methods=["POST"])
+def devices_edit_name():
+    return fun.devices_edit_name_()
+
 # 设备鉴权（登录）
 @app.route('/devices/authentication', methods=["POST"])
 def devices_authentication():

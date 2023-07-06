@@ -37,4 +37,4 @@ dbr = FlaskRedis(app)
 
 if __name__ == '__main__':
     dbr.set("123","jdfhshdfshfusf")
-    print(dbr.get("1231"))
+    print(dbr.get("123"))

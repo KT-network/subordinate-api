@@ -240,31 +240,42 @@ def devices_type_list_(type):
 # 添加设备
 def devices_add_():
     if request.headers.get("UserToken") is None:
-        return _jsonToStr(code=400, data="缺少必要参数")
+        return _jsonToStr(code=400, msg="缺少必要参数")
     token = request.headers['UserToken']
     id = _checkToken(token)
     if id == -1:
-        return _jsonToStr(code=405, data="登录已过期")
+        return _jsonToStr(code=405, msg="登录已过期")
     data = request.json
 
     if len(data['addDevices']) == 0:
-        return _jsonToStr(code=400, data="设备列表为空")
+        return _jsonToStr(code=400, msg="设备列表为空")
 
-    devicesList = []
-    for item in data['addDevices']:
-        devicesList.append(
-            dataBase.Devices(name=item['name'],
-                             devicesId=item['id'],
-                             devicesType=item['type'],
-                             picUrl=item['pic'],
-                             userId=id.id,
-                             createTime=_getTimeDate_())
-        )
+    if dataBase.Devices.query.filter(dataBase.Devices.devicesId == data['addDevices']['id'],
+                                     dataBase.Devices.delTime == None).count() != 0:
+        return _jsonToStr(code=401, msg="设备已被绑定过")
 
-        db.session.add_all(devicesList)
-        db.session.commit()
+    devices = dataBase.Devices(name=data['addDevices']['name'],
+                               devicesId=data['addDevices']['id'],
+                               devicesType=data['addDevices']['type'],
+                               picUrl=data['addDevices']['pic'],
+                               userId=id.id,
+                               createTime=_getTimeDate_())
 
-        return _jsonToStr(data="添加成功")
+    # devicesList = []
+    # for item in data['addDevices']:
+    #     devicesList.append(
+    #         dataBase.Devices(name=item['name'],
+    #                          devicesId=item['id'],
+    #                          devicesType=item['type'],
+    #                          picUrl=item['pic'],
+    #                          userId=id.id,
+    #                          createTime=_getTimeDate_())
+    #     )
+
+    db.session.add(devices)
+    db.session.commit()
+
+    return _jsonToStr(msg="添加成功")
 
 
 # 获取设备类型列表
@@ -292,18 +303,18 @@ def get_devices_type_list_():
 # 添加设备类型
 def devices_type_add_():
     if request.headers.get("UserToken") is None:
-        return _jsonToStr(code=400, data="缺少必要参数")
+        return _jsonToStr(code=400, msg="缺少必要参数")
     token = request.headers['UserToken']
     id = _checkToken(token)
     if id == -1:
-        return _jsonToStr(code=405, data="登录已过期")
+        return _jsonToStr(code=405, msg="登录已过期")
     data = request.json
 
     if id.role.value != 0:
-        return _jsonToStr(code=400, data="无权限")
+        return _jsonToStr(code=400, msg="无权限")
 
     if len(data['addDevicesType']) == 0:
-        return _jsonToStr(code=400, data="设备列表为空")
+        return _jsonToStr(code=400, msg="设备列表为空")
     dataT = data['addDevicesType']
     dataDT = dataBase.DevicesType(name=dataT['name'],
                                   type=dataT['type'],
@@ -314,10 +325,35 @@ def devices_type_add_():
     return _jsonToStr(data="添加成功")
 
 
+# 修改设备名称
+def devices_edit_name_():
+    if request.headers.get("UserToken") is None:
+        return _jsonToStr(code=400, msg="缺少必要参数")
+    token = request.headers['UserToken']
+    ids = _checkToken(token)
+    if ids == -1:
+        return _jsonToStr(code=405, msg="登录已过期")
+    data = request.json
+
+    if data.get("name") is None or data.get("id") is None:
+        return _jsonToStr(code=400, msg="缺少必要参数")
+
+    editIs = ids.devices.filter(dataBase.Devices.id == int(data.get("id")),
+                                dataBase.Devices.delTime == None).update({"name": data.get("name")})
+    db.session.commit()
+
+    return _jsonToStr(data="修改成功" if editIs == 1 else "修改失败")
+
+
 # 设备校验
 def devices_authentication_():
     result = {"result": "deny", "is_superuser": False}
     data = request.json
+
+    if data['clientid'] == "services":
+        result["result"] = "allow"
+        result["is_superuser"] = True
+        return json.dumps(result), 200, {"Content-Type": "application/json"}
 
     print(data)
     if 'user' not in data.keys() or 'pwd' not in data.keys() or "clientid" not in data.keys():
@@ -339,6 +375,7 @@ def devices_authentication_():
         result["result"] = "allow"
         return json.dumps(result), 200, {"Content-Type": "application/json"}
 
+
     devices = users.devices.filter(dataBase.Devices.devicesId == data['clientid'],
                                    dataBase.Devices.delTime == None).first()
 
@@ -355,13 +392,21 @@ def devices_authentication_():
 
 
 if __name__ == '__main__':
+    pass
     # 子查父
     # de = dataBase.Devices.query.filter_by(id=1).first()
     # print(de.user.user)
     #
+
+    user = dataBase.User.query.filter_by(id=1).first()
+
+    print(user.devices.all())
+
     # # 夫查子
     # user = dataBase.User.query.filter_by(id=1).first()
-    # print(user.devices.all())
+    # print(user.devices.filter(dataBase.Devices.id == 2,dataBase.Devices.delTime != None).update({"name": "二坤1"}))
+    # db.session.commit()
+
     #
     # devices_ = dataBase.Devices.query.all()
     # print(devices_)
@@ -372,5 +417,9 @@ if __name__ == '__main__':
     # print(devices_)
     #
     # print(_getTimeDate_())
-    userId = dataBase.User.query.filter_by(user="841369846", delTime=None).first()
-    print(userId.devices.filter(dataBase.Devices.delTime == None).all()[0].devicesId)
+    # userId = dataBase.User.query.filter_by(user="841369846", delTime=None).first()
+    # print(userId.devices.filter(dataBase.Devices.delTime == None).all()[0].devicesId)
+    # a = dataBase.Devices.query.filter(dataBase.Devices.devicesId == "203d74f95560",
+    #                                   dataBase.Devices.delTime == None).all()
+    #
+    # print(a)

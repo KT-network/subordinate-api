@@ -17,6 +17,7 @@ class User(db.Model):
     email = db.Column(db.String(50), nullable=False)
     devices = db.relationship("Devices", backref='user', lazy='dynamic')
     role = db.Column(db.Enum(UserRole), default=UserRole.NORMAL_USER)
+    state = db.Column(db.Boolean, default=False)
     createTime = db.Column(db.DateTime)
     delTime = db.Column(db.DateTime)
 
@@ -28,6 +29,7 @@ class Devices(db.Model):
     devicesId = db.Column(db.String(255), nullable=False)
     devicesType = db.Column(db.String(100), nullable=False)
     picUrl = db.Column(db.String(255), nullable=False)
+    state = db.Column(db.Boolean, default=False)
     userId = db.Column(db.Integer, db.ForeignKey('user.id'))
     dev_state = db.relationship("DevicesHistoryState", backref='devices', lazy='dynamic')
     createTime = db.Column(db.DateTime)
