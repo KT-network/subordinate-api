@@ -5,3 +5,6 @@ flask-Mail
 flask-MySQLdb
 flask_redis
 SQLAlchemy
+flask_mqtt
+flask_apscheduler
+apscheduler

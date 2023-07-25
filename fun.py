@@ -2,12 +2,22 @@ import hashlib
 import re
 from threading import Thread
 
-from config import request, db, dbr, Message, mail, app
+from config import request, db, dbr, Message, mail, app, scheduler, mqtt_client
 import dataBase
 import json
 import time
 from datetime import datetime
 import random
+
+
+# 生成设备状态下发话题
+def devicesStateIssueTopic(userId: str) -> str:
+    return "ks/server/general/" + userId + "/devices/state"
+
+
+# 生成设备动作下发话题，服务端发送给设备的话题 （设备id）
+def devicesIssueTopic(devicesId: str) -> str:
+    return "ks/server/subordinate/" + devicesId + "/action"
 
 
 def _getTime():
@@ -155,7 +165,9 @@ def register_():
         return _jsonToStr(code=400, msg="验证码已过期，验证码错误")
     try:
         md5Pwd = _getMd5(data['user'] + "-/-" + data['pwd'])
-        db.session.add(dataBase.User(user=data['user'], passwd=md5Pwd, email=data['email'], createTime=_getTimeDate_()))
+        db.session.add(
+            dataBase.User(user=data['user'], userId=_getMd5(data['user']), passwd=md5Pwd, email=data['email'],
+                          createTime=_getTimeDate_()))
         db.session.commit()
         dbr.delete(data['code'])
         token = _generateToken(data['user'], data['pwd'])
@@ -204,12 +216,12 @@ def devices_list_():
     if request.headers.get("UserToken") is None:
         return _jsonToStr(code=400, msg="缺少必要参数")
     token = request.headers['UserToken']
-    id = _checkToken(token)
-    if id == -1:
+    ids = _checkToken(token)
+    if ids == -1:
         return _jsonToStr(code=405, msg="登录已过期")
 
     devices = []
-    for i in id.devices.filter(dataBase.Devices.delTime == None).all():
+    for i in ids.devices.filter(dataBase.Devices.delTime == None).all():
         info = {}
         info['id'] = i.id
         info['name'] = i.name
@@ -226,8 +238,8 @@ def devices_type_list_(type):
     if request.headers.get("UserToken") is None or type == "":
         return _jsonToStr(code=400, msg="缺少必要参数")
     token = request.headers['UserToken']
-    id = _checkToken(token)
-    if id == -1:
+    ids = _checkToken(token)
+    if ids == -1:
         return _jsonToStr(code=405, msg="登录已过期")
 
     devices_ = dataBase.Devices.query.filter_by(devicesType=type).all()
@@ -242,8 +254,8 @@ def devices_add_():
     if request.headers.get("UserToken") is None:
         return _jsonToStr(code=400, msg="缺少必要参数")
     token = request.headers['UserToken']
-    id = _checkToken(token)
-    if id == -1:
+    ids = _checkToken(token)
+    if ids == -1:
         return _jsonToStr(code=405, msg="登录已过期")
     data = request.json
 
@@ -253,29 +265,201 @@ def devices_add_():
     if dataBase.Devices.query.filter(dataBase.Devices.devicesId == data['addDevices']['id'],
                                      dataBase.Devices.delTime == None).count() != 0:
         return _jsonToStr(code=401, msg="设备已被绑定过")
+    type = dataBase.DevicesType.query.filter(dataBase.DevicesType.id == data['addDevices']['type']).first()
+
+    if type is None:
+        return _jsonToStr(code=400, msg="没有该设备类型")
 
     devices = dataBase.Devices(name=data['addDevices']['name'],
                                devicesId=data['addDevices']['id'],
                                devicesType=data['addDevices']['type'],
                                picUrl=data['addDevices']['pic'],
-                               userId=id.id,
+                               userId=ids.id,
                                createTime=_getTimeDate_())
-
-    # devicesList = []
-    # for item in data['addDevices']:
-    #     devicesList.append(
-    #         dataBase.Devices(name=item['name'],
-    #                          devicesId=item['id'],
-    #                          devicesType=item['type'],
-    #                          picUrl=item['pic'],
-    #                          userId=id.id,
-    #                          createTime=_getTimeDate_())
-    #     )
-
     db.session.add(devices)
+    db.session.commit()
+    if type.type == dataBase.ConfigType.PROGRAM:
+        did = dataBase.Devices.query.filter(dataBase.Devices.devicesId == data['addDevices']['id'],
+                                            dataBase.Devices.delTime == None).first()
+
+        nowGpio = dataBase.Gpio(devicesId=did.id,
+                                io=type.gpio_list,
+                                name=data['addDevices']['name'],
+                                type=dataBase.ConfigType.PROGRAM,
+                                createTime=_getTimeDate_())
+        db.session.add(nowGpio)
+        db.session.commit()
+
+    return _jsonToStr(msg="添加成功")
+
+
+# 添加设备GPIO引脚
+def devices_gpio_add_():
+    if request.headers.get("UserToken") is None:
+        return _jsonToStr(code=400, msg="缺少必要参数")
+    token = request.headers['UserToken']
+    ids = _checkToken(token)
+    if ids == -1:
+        return _jsonToStr(code=405, msg="登录已过期")
+    data = request.json
+    devices = ids.devices.filter(dataBase.Devices.id == data['devicesId'],
+                                 dataBase.Devices.delTime == None).first()
+    if devices is None:
+        return _jsonToStr(code=400, msg="设备不存在")
+
+    if devices.gpio.filter(dataBase.Gpio.io == data["io"], dataBase.Gpio.delTime == None).first() is not None:
+        return _jsonToStr(code=400, msg="子设备已存在")
+
+    nowGpio = dataBase.Gpio(devicesId=devices.id,
+                            io=data['io'],
+                            name=data['name'],
+                            icon=data['icon'],
+                            type=dataBase.ConfigType.SWITCH if data['type'] == 0 else dataBase.ConfigType.PROGRAM,
+                            createTime=_getTimeDate_())
+    db.session.add(nowGpio)
+    db.session.commit()
+    return _jsonToStr(msg="添加成功")
+
+
+# 添加设备Gpio引脚的任务
+def devices_gpio_task_add_():
+    def create_task_id(devicesId, id):
+        taskId = str(devicesId) + "-" + str(id) + "-" + str(_randomCode(6))
+        if dataBase.SwitchGpio.query.filter(dataBase.SwitchGpio.taskId == taskId).count() == 0:
+            return taskId
+        return create_task_id(devicesId, id)
+
+    if request.headers.get("UserToken") is None:
+        return _jsonToStr(code=400, msg="缺少必要参数")
+    token = request.headers['UserToken']
+    ids = _checkToken(token)
+    if ids == -1:
+        return _jsonToStr(code=405, msg="登录已过期")
+    data = request.json
+    gpio = dataBase.Gpio.query.filter(
+        dataBase.Gpio.id == data.get("gpio"), dataBase.Gpio.delTime == None).first()
+
+    if gpio is None:
+        return _jsonToStr(code=400, msg="子设备不存在")
+
+    if data.get("value") == 0:
+        value = dataBase.SwitchValue.OPEN
+    elif data.get("value") == 1:
+        value = dataBase.SwitchValue.CLOSE
+    elif data.get("value") == 2:
+        value = dataBase.SwitchValue.FLICKER
+    else:
+        value = dataBase.SwitchValue.OPEN
+    taskId = create_task_id(gpio.devicesId, gpio.id)
+    switchGpio = dataBase.SwitchGpio(gpioId=gpio.id,
+                                     taskId=taskId,
+                                     taskName=data.get("name"),
+                                     value=value,
+                                     interval=json.dumps(data.get("interval")),
+                                     lasting=data.get("lasting"),
+                                     startDate=data.get("startDate"),
+                                     destroyDate=data.get("destroyDate"),
+                                     finish=False,
+                                     createTime=_getTimeDate_())
+
+    if data.get("lasting") == 2:
+        """持久"""
+        if data.get("startDate") == -1:
+            if data.get("destroyDate") == -1:
+                scheduler.add_job(
+                    id=taskId,
+                    func=switch_action,
+                    trigger="cron",
+                    month="*" if data.get("interval").get("month") == 0 else data.get("interval").get(
+                        "month"),
+                    day="*" if data.get("interval").get("day") == 0 else data.get("interval").get(
+                        "day"),
+                    hour="*" if data.get("interval").get("hour") == 0 else data.get("interval").get(
+                        "hour"),
+                    minute="*" if data.get("interval").get("minute") == 0 else data.get("interval").get(
+                        "minute"),
+                    second="*" if data.get("interval").get("second") == 0 else data.get("interval").get(
+                        "second"),
+                    kwargs={"taskId": taskId}
+                )
+            else:
+                scheduler.add_job(
+                    id=taskId,
+                    func=switch_action,
+                    trigger="cron",
+                    month="*" if data.get("interval").get("month") == 0 else data.get("interval").get(
+                        "month"),
+                    day="*" if data.get("interval").get("day") == 0 else data.get("interval").get(
+                        "day"),
+                    hour="*" if data.get("interval").get("hour") == 0 else data.get("interval").get(
+                        "hour"),
+                    minute="*" if data.get("interval").get("minute") == 0 else data.get("interval").get(
+                        "minute"),
+                    second="*" if data.get("interval").get("second") == 0 else data.get("interval").get(
+                        "second"),
+                    end_date=data.get("destroyDate"),
+                    kwargs={"taskId": taskId}
+                )
+        else:
+            if data.get("destroyDate") == -1:
+                scheduler.add_job(
+                    id=taskId,
+                    func=switch_action,
+                    trigger="cron",
+                    month="*" if data.get("interval").get("month") == 0 else data.get("interval").get(
+                        "month"),
+                    day="*" if data.get("interval").get("day") == 0 else data.get("interval").get(
+                        "day"),
+                    hour="*" if data.get("interval").get("hour") == 0 else data.get("interval").get(
+                        "hour"),
+                    minute="*" if data.get("interval").get("minute") == 0 else data.get("interval").get(
+                        "minute"),
+                    second="*" if data.get("interval").get("second") == 0 else data.get("interval").get(
+                        "second"),
+                    start_date=data.get("startDate"),
+                    kwargs={"taskId": taskId}
+                )
+            else:
+                scheduler.add_job(
+                    id=taskId,
+                    func=switch_action,
+                    trigger="cron",
+                    month="*" if data.get("interval").get("month") == 0 else data.get("interval").get(
+                        "month"),
+                    day="*" if data.get("interval").get("day") == 0 else data.get("interval").get(
+                        "day"),
+                    hour="*" if data.get("interval").get("hour") == 0 else data.get("interval").get(
+                        "hour"),
+                    minute="*" if data.get("interval").get("minute") == 0 else data.get("interval").get(
+                        "minute"),
+                    second="*" if data.get("interval").get("second") == 0 else data.get("interval").get(
+                        "second"),
+                    start_date=data.get("startDate"),
+                    end_date=data.get("destroyDate"),
+                    kwargs={"taskId": taskId}
+                )
+    elif data.get("lasting") == 1:
+        """定时一次"""
+        scheduler.add_job(id=taskId, func=switch_action, trigger="date", run_date=data.get("startDate"),
+                          kwargs={"taskId": taskId})
+
+    db.session.add(switchGpio)
     db.session.commit()
 
     return _jsonToStr(msg="添加成功")
+
+
+# 删除设备
+def devices_del_():
+    if request.headers.get("UserToken") is None:
+        return _jsonToStr(code=400, msg="缺少必要参数")
+    token = request.headers['UserToken']
+    ids = _checkToken(token)
+    if ids == -1:
+        return _jsonToStr(code=405, msg="登录已过期")
+    data = request.json
+
+    dataBase.Devices.query.filter(dataBase.Devices.devicesId == "").update()
 
 
 # 获取设备类型列表
@@ -283,8 +467,8 @@ def get_devices_type_list_():
     if request.headers.get("UserToken") is None:
         return _jsonToStr(code=400, msg="缺少必要参数")
     token = request.headers['UserToken']
-    id = _checkToken(token)
-    if id == -1:
+    ids = _checkToken(token)
+    if ids == -1:
         return _jsonToStr(code=405, msg="登录已过期")
     devicesType = []
     devices_ = dataBase.DevicesType.query.filter(dataBase.DevicesType.delTime == None).all()
@@ -292,7 +476,7 @@ def get_devices_type_list_():
         info = {}
         info['id'] = item.id
         info['name'] = item.name
-        info['type'] = item.type
+        info['type'] = item.typeName
         info['picUrl'] = item.picUrl
         info['size'] = item.size
         info['createTime'] = str(item.createTime)
@@ -305,23 +489,27 @@ def devices_type_add_():
     if request.headers.get("UserToken") is None:
         return _jsonToStr(code=400, msg="缺少必要参数")
     token = request.headers['UserToken']
-    id = _checkToken(token)
-    if id == -1:
+    ids = _checkToken(token)
+    if ids == -1:
         return _jsonToStr(code=405, msg="登录已过期")
     data = request.json
 
-    if id.role.value != 0:
+    if ids.role.value != 0:
         return _jsonToStr(code=400, msg="无权限")
 
     if len(data['addDevicesType']) == 0:
         return _jsonToStr(code=400, msg="设备列表为空")
     dataT = data['addDevicesType']
     dataDT = dataBase.DevicesType(name=dataT['name'],
-                                  type=dataT['type'],
+                                  typeName=dataT['typeName'],
+                                  type=dataBase.ConfigType.SWITCH if dataT[
+                                                                         'type'] == 0 else dataBase.ConfigType.PROGRAM,
+                                  gpio=dataT['io'],
                                   picUrl=dataT['picUrl'],
                                   size=dataT['size'],
                                   createTime=_getTimeDate_())
     db.session.add(dataDT)
+
     return _jsonToStr(data="添加成功")
 
 
@@ -375,7 +563,6 @@ def devices_authentication_():
         result["result"] = "allow"
         return json.dumps(result), 200, {"Content-Type": "application/json"}
 
-
     devices = users.devices.filter(dataBase.Devices.devicesId == data['clientid'],
                                    dataBase.Devices.delTime == None).first()
 
@@ -391,6 +578,43 @@ def devices_authentication_():
     return json.dumps(result), 200, {"Content-Type": "application/json"}
 
 
+def switch_task_add(jo, devicesId):
+    pass
+
+
+def switch_action(**kwargs):
+    taskId = kwargs['taskId']
+
+    task = dataBase.SwitchGpio.query.filter(dataBase.SwitchGpio.taskId == taskId,
+                                            dataBase.SwitchGpio.delTime == None).first()
+    if task is None:
+        return
+    if task.value == dataBase.SwitchValue.OPEN:
+        pla = bytes([2, task.gpio.io, 0])
+        mqtt_client.publish(devicesIssueTopic(task.gpio.devices.devicesId), pla)
+        task.gpio.state = True
+        db.commit()
+
+    elif task.value == dataBase.SwitchValue.CLOSE:
+        pla = bytes([2, task.gpio.io, 1])
+        mqtt_client.publish(devicesIssueTopic(task.gpio.devices.devicesId), pla)
+        task.gpio.state = False
+        db.commit()
+
+    elif task.value == dataBase.SwitchValue.FLICKER:
+        state = 0 if task.gpio.state == False else 1
+        pla = bytes([2, task.gpio.io, state])
+        mqtt_client.publish(devicesIssueTopic(task.gpio.devices.devicesId), pla)
+        task.gpio.state = True if state == 0 else False
+        db.session.commit()
+
+
+def test():
+    user = dataBase.User.query.filter(dataBase.User.user == "841369846").first()
+    print(user.user)
+    print(_getTimeDate())
+
+
 if __name__ == '__main__':
     pass
     # 子查父
@@ -398,9 +622,13 @@ if __name__ == '__main__':
     # print(de.user.user)
     #
 
-    user = dataBase.User.query.filter_by(id=1).first()
-
-    print(user.devices.all())
+    # user = dataBase.User.query.filter_by(id=1).first()
+    #
+    # dataBase.Devices.query.filter(dataBase.Devices.devicesId == "1-9").update({"delTime": "2023-07-12 23:52:19"},
+    #                                                                           synchronize_session=False)
+    # db.session.commit()
+    #
+    # print(user.devices.first().devicesId)
 
     # # 夫查子
     # user = dataBase.User.query.filter_by(id=1).first()
@@ -423,3 +651,16 @@ if __name__ == '__main__':
     #                                   dataBase.Devices.delTime == None).all()
     #
     # print(a)
+    # ids = _checkToken("b739d352776579b3f75245069b058a53")
+    # de = ids.devices.filter(dataBase.Devices.id == 1).first()
+    # print(de)
+    # gp = de.gpio.filter(dataBase.Gpio.io == 1).first()
+    # print(gp)
+    # type = dataBase.DevicesType.query.filter(dataBase.DevicesType.id == 1).first()
+    # print(type.type.value)
+    devices_ = dataBase.Devices.query.filter(dataBase.Devices.id == 1).first()
+    print(devices_.user.user)
+
+    task = dataBase.SwitchGpio.query.filter(dataBase.SwitchGpio.taskId == "2-1-287529",
+                                            dataBase.SwitchGpio.delTime == None).first()
+    print(task.gpio.devices.devicesId)
