@@ -73,6 +73,10 @@ def _validateEmail(email):
         return False
 
 
+def _rgb(g, b, r):
+    return ((r & 0xf8) << 8) | ((g & 0xfc) << 3) | ((b & 0xf8) >> 3)
+
+
 # 发送邮件
 def _sendEmail(email, msg):
     def send_async_email(app, msg):
@@ -283,7 +287,7 @@ def devices_add_():
                                             dataBase.Devices.delTime == None).first()
 
         nowGpio = dataBase.Gpio(devicesId=did.id,
-                                io=type.gpio_list,
+                                io=type.gpio,
                                 name=data['addDevices']['name'],
                                 type=dataBase.ConfigType.PROGRAM,
                                 createTime=_getTimeDate_())
@@ -578,10 +582,6 @@ def devices_authentication_():
     return json.dumps(result), 200, {"Content-Type": "application/json"}
 
 
-def switch_task_add(jo, devicesId):
-    pass
-
-
 def switch_action(**kwargs):
     taskId = kwargs['taskId']
 
@@ -608,59 +608,90 @@ def switch_action(**kwargs):
         task.gpio.state = True if state == 0 else False
         db.session.commit()
 
+# 控制io口
+def switch_ctrl_(jo, devices: dataBase.Devices):
+    # io 为 gpio表的ID
+    a = {"action": "switch", "data": {"io": 1, "value": 0}}
 
-def test():
-    user = dataBase.User.query.filter(dataBase.User.user == "841369846").first()
-    print(user.user)
-    print(_getTimeDate())
+    gpio = devices.gpio.filter(dataBase.Gpio.id == jo.get("data").get("io"), dataBase.Gpio.delTime == None).first()
+    if gpio is None or gpio.type != dataBase.ConfigType.SWITCH:
+        return
+    pla = bytes([2, gpio.io, jo.get("data").get("value")])
+    gpio.state = True if jo.get("data").get("value") == 0 else False
+    db.session.commit()
+    mqtt_client.publish(devicesIssueTopic(devices.devicesId), pla)
+
+
+# 下发修改wifi配置的消息
+def wifi_edit_issue_(jo, devices: dataBase.Devices):
+    a = {"action": "wifi", "restart": 0,
+         "wifi": {"dhcp": 0, "ssid": "TP-LINK_803F", "pwd": "ks123456", "ip": [192, 168, 0, 159],
+                  "maskCode": [255, 255, 255, 0], "gateway": [192, 168, 0, 254], "dns": [192, 168, 0, 254]}}
+
+    wifi = json.dumps(jo.get("wifi"))
+    wifiRestart = int(jo.get("restart"))
+    pla = bytes([1, wifiRestart]) + bytes(wifi, "utf-8")
+    mqtt_client.publish(devicesIssueTopic(devices.devicesId), pla)
+
+# 控制单个像素
+def matrix_pixel_(jo, devices: dataBase.Devices):
+    a = {"action": "pixel", "data": {"x": 0, "y": 0, "color": [1, 1, 1]}}
+    pla = bytes([4, jo.get("data").get("x"), jo.get("data").get("y"),
+                 jo.get("data").get("color")[0], jo.get("data").get("color")[1], jo.get("data").get("color")[2]])
+    mqtt_client.publish(devicesIssueTopic(devices.devicesId), pla)
+
+# 清屏
+def matrix_pixel_fill_(jo, devices: dataBase.Devices):
+    pla = bytes([3, jo.get("data").get("color")[0], jo.get("data").get("color")[1], jo.get("data").get("color")[2]])
+    mqtt_client.publish(devicesIssueTopic(devices.devicesId), pla)
 
 
 if __name__ == '__main__':
     pass
-    # 子查父
-    # de = dataBase.Devices.query.filter_by(id=1).first()
-    # print(de.user.user)
-    #
+# 子查父
+# de = dataBase.Devices.query.filter_by(id=1).first()
+# print(de.user.user)
+#
 
-    # user = dataBase.User.query.filter_by(id=1).first()
-    #
-    # dataBase.Devices.query.filter(dataBase.Devices.devicesId == "1-9").update({"delTime": "2023-07-12 23:52:19"},
-    #                                                                           synchronize_session=False)
-    # db.session.commit()
-    #
-    # print(user.devices.first().devicesId)
+# user = dataBase.User.query.filter_by(id=1).first()
+#
+# dataBase.Devices.query.filter(dataBase.Devices.devicesId == "1-9").update({"delTime": "2023-07-12 23:52:19"},
+#                                                                           synchronize_session=False)
+# db.session.commit()
+#
+# print(user.devices.first().devicesId)
 
-    # # 夫查子
-    # user = dataBase.User.query.filter_by(id=1).first()
-    # print(user.devices.filter(dataBase.Devices.id == 2,dataBase.Devices.delTime != None).update({"name": "二坤1"}))
-    # db.session.commit()
+# # 夫查子
+# user = dataBase.User.query.filter_by(id=1).first()
+# print(user.devices.filter(dataBase.Devices.id == 2,dataBase.Devices.delTime != None).update({"name": "二坤1"}))
+# db.session.commit()
 
-    #
-    # devices_ = dataBase.Devices.query.all()
-    # print(devices_)
-    #
-    # print(dataBase.User.query.filter_by(email="841369846@qq.com").count())
+#
+# devices_ = dataBase.Devices.query.all()
+# print(devices_)
+#
+# print(dataBase.User.query.filter_by(email="841369846@qq.com").count())
 
-    # devices_ = dataBase.DevicesType.query.filter(dataBase.DevicesType.delTime == None).all()
-    # print(devices_)
-    #
-    # print(_getTimeDate_())
-    # userId = dataBase.User.query.filter_by(user="841369846", delTime=None).first()
-    # print(userId.devices.filter(dataBase.Devices.delTime == None).all()[0].devicesId)
-    # a = dataBase.Devices.query.filter(dataBase.Devices.devicesId == "203d74f95560",
-    #                                   dataBase.Devices.delTime == None).all()
-    #
-    # print(a)
-    # ids = _checkToken("b739d352776579b3f75245069b058a53")
-    # de = ids.devices.filter(dataBase.Devices.id == 1).first()
-    # print(de)
-    # gp = de.gpio.filter(dataBase.Gpio.io == 1).first()
-    # print(gp)
-    # type = dataBase.DevicesType.query.filter(dataBase.DevicesType.id == 1).first()
-    # print(type.type.value)
-    devices_ = dataBase.Devices.query.filter(dataBase.Devices.id == 1).first()
-    print(devices_.user.user)
+# devices_ = dataBase.DevicesType.query.filter(dataBase.DevicesType.delTime == None).all()
+# print(devices_)
+#
+# print(_getTimeDate_())
+# userId = dataBase.User.query.filter_by(user="841369846", delTime=None).first()
+# print(userId.devices.filter(dataBase.Devices.delTime == None).all()[0].devicesId)
+# a = dataBase.Devices.query.filter(dataBase.Devices.devicesId == "203d74f95560",
+#                                   dataBase.Devices.delTime == None).all()
+#
+# print(a)
+# ids = _checkToken("b739d352776579b3f75245069b058a53")
+# de = ids.devices.filter(dataBase.Devices.id == 1).first()
+# print(de)
+# gp = de.gpio.filter(dataBase.Gpio.io == 1).first()
+# print(gp)
+# type = dataBase.DevicesType.query.filter(dataBase.DevicesType.id == 1).first()
+# print(type.type.value)
+devices_ = dataBase.Devices.query.filter(dataBase.Devices.id == 1).first()
+print(devices_.user.user)
 
-    task = dataBase.SwitchGpio.query.filter(dataBase.SwitchGpio.taskId == "2-1-287529",
-                                            dataBase.SwitchGpio.delTime == None).first()
-    print(task.gpio.devices.devicesId)
+task = dataBase.SwitchGpio.query.filter(dataBase.SwitchGpio.taskId == "2-1-287529",
+                                        dataBase.SwitchGpio.delTime == None).first()
+print(task.gpio.devices.devicesId)

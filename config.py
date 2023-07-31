@@ -56,9 +56,9 @@ mqtt_client = Mqtt(app)
 topicConnected = "$SYS/brokers/+/clients/+/connected"
 # 设备（app）掉线话题
 topicDisconnected = "$SYS/brokers/+/clients/+/disconnected"
-# app消息话题
+# app消息话题 userid,devicesId
 topicAppMsg = "ks/general/+/+/action"
-# 设备消息话题
+# 设备消息话题  devicesId,userid
 topicDevicesMsg = "ks/subordinate/+/+/action"
 
 

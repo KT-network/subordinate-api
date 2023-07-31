@@ -1,5 +1,4 @@
 import json
-
 from config import app, db, mqtt_client
 import fun
 import dataBase
@@ -66,7 +65,7 @@ def handle_message(client, userdata, msg):
                     mqtt_client.publish(fun.devicesStateIssueTopic(userId), json.dumps(devicesState))
                     # mqtt_client.unsubscribe(fun.appSubscribeTopic(userId, jo.get("clientid")))
 
-    elif topics[len(topics) - 1] == "action":
+    elif topics[len(topics) - 1] == "action" and topics[1] == "general":
         devicesId = topics[len(topics) - 2]
         generalId = topics[len(topics) - 3]
         try:
@@ -83,7 +82,17 @@ def handle_message(client, userdata, msg):
             return
 
         if jo.get("action") == "switch":
-            fun.switch_task_add(jo, devicesId)
+            '''io 引脚控制'''
+            fun.switch_ctrl_(jo, devices)
+        elif jo.get("action") == "wifi":
+            '''配置wifi'''
+            fun.wifi_edit_issue_(jo, devices)
+        elif jo.get("action") == "pixel":
+            '''控制单个像素(每个设备只有一个pixel引脚)'''
+            fun.matrix_pixel_(jo, devices)
+        elif jo.get("action") == "pixel-fill":
+            '''清屏'''
+            fun.matrix_pixel_fill_(jo, devices)
 
 
 # 登录
