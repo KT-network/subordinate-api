@@ -16,6 +16,10 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql://whose:kunshao@192.168.1.150:330
 app.config['SQLALCHEMY_COMMIT_ON_TEARDOWN'] = True
 # 隐藏不必要的报错
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = True
+# 回收连接
+app.config["SQLALCHEMY_POOL_RECYCLE"] = 1800
+# 每次执行sql前 悲观检查db是否可用;虽然资源稍微额外的消耗,但是简单可靠
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {'pool_pre_ping': True}
 
 app.app_context().push()
 

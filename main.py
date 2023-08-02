@@ -7,92 +7,96 @@ import dataBase
 @mqtt_client.on_message()
 def handle_message(client, userdata, msg):
     topics = msg.topic.split("/")
-    if topics[len(topics) - 1] == "connected":
-        jo = json.loads(msg.payload)
-        userName = jo.get("username")
-        userId = fun._getMd5(userName)
-        if jo.get("clientid")[- 3:] == "app":
-            if jo.get("clientid")[:-4] == userId:
-                dataBase.User.query.filter(dataBase.User.user == userName, dataBase.User.delTime == None).update(
-                    {"state": True})
-                db.session.commit()
+    with app.app_context():
 
-                devices = dataBase.User.query.filter(
-                    dataBase.User.user == userName, dataBase.User.delTime == None
-                ).first().devices.filter(
-                    dataBase.Devices.delTime == None).all()
-                devicesState = {}
-                for item in devices:
-                    devicesState.update({item.devicesId: item.state})
-                mqtt_client.publish(fun.devicesStateIssueTopic(userId), json.dumps(devicesState))
-        else:
-            user = dataBase.User.query.filter(dataBase.User.user == userName, dataBase.User.delTime == None).first()
-            if user is not None:
-                user.devices.filter(dataBase.Devices.delTime == None,
-                                    dataBase.Devices.devicesId == jo.get("clientid")).update(
-                    {"state": True})
-                db.session.commit()
-                if user.state:
-                    devices = user.devices.filter(dataBase.Devices.delTime == None).all()
-                    devicesState = {}
-                    for item in devices:
-                        devicesState.update({item.devicesId: item.state})
-                    mqtt_client.publish(fun.devicesStateIssueTopic(userId), json.dumps(devicesState))
-                    # mqtt_client.subscribe(fun.appSubscribeTopic(userId, jo.get("clientid")))
-
-    elif topics[len(topics) - 1] == "disconnected":
-        jo = json.loads(msg.payload)
-        userName = jo.get("username")
-        userId = fun._getMd5(userName)
-        if jo.get("clientid")[- 3:] == "app":
-            if jo.get("clientid")[:-4] == userId:
-                dataBase.User.query.filter(
-                    dataBase.User.user == userName, dataBase.User.delTime == None).update(
-                    {"state": False})
-                db.session.commit()
-        else:
-            user = dataBase.User.query.filter(dataBase.User.user == userName, dataBase.User.delTime == None).first()
-            if user is not None:
-                user.devices.filter(dataBase.Devices.delTime == None,
-                                    dataBase.Devices.devicesId == jo.get("clientid")).update(
-                    {"state": False})
-                db.session.commit()
-                if user.state:
-                    devices = user.devices.filter(dataBase.Devices.delTime == None).all()
-                    devicesState = {}
-                    for item in devices:
-                        devicesState.update({item.devicesId: item.state})
-                    mqtt_client.publish(fun.devicesStateIssueTopic(userId), json.dumps(devicesState))
-                    # mqtt_client.unsubscribe(fun.appSubscribeTopic(userId, jo.get("clientid")))
-
-    elif topics[len(topics) - 1] == "action" and topics[1] == "general":
-        devicesId = topics[len(topics) - 2]
-        generalId = topics[len(topics) - 3]
-        try:
+        if topics[len(topics) - 1] == "connected":
             jo = json.loads(msg.payload)
-        except:
-            return
-        devices = dataBase.User.query.filter(
-            dataBase.User.userId == generalId, dataBase.User.delTime == None
-        ).first().devices.filter(
-            dataBase.Devices.devicesId == devicesId, dataBase.Devices.delTime == None
-        ).first()
+            userName = jo.get("username")
+            userId = fun._getMd5(userName)
+            if jo.get("clientid")[- 3:] == "app":
+                if jo.get("clientid")[:-4] == userId:
+                    dataBase.User.query.filter(dataBase.User.user == userName, dataBase.User.delTime == None).update(
+                        {"state": True})
+                    db.session.commit()
 
-        if devices is None:
-            return
+                    devices = dataBase.User.query.filter(
+                        dataBase.User.user == userName, dataBase.User.delTime == None
+                    ).first().devices.filter(
+                        dataBase.Devices.delTime == None).all()
+                    devicesState = {}
+                    for item in devices:
+                        devicesState.update({item.devicesId: item.state})
+                    mqtt_client.publish(fun.devicesStateIssueTopic(userId), json.dumps(devicesState))
+            else:
+                user = dataBase.User.query.filter(dataBase.User.user == userName, dataBase.User.delTime == None).first()
+                if user is not None:
+                    user.devices.filter(dataBase.Devices.delTime == None,
+                                        dataBase.Devices.devicesId == jo.get("clientid")).update(
+                        {"state": True})
+                    db.session.commit()
+                    if user.state:
+                        devices = user.devices.filter(dataBase.Devices.delTime == None).all()
+                        devicesState = {}
+                        for item in devices:
+                            devicesState.update({item.devicesId: item.state})
+                        mqtt_client.publish(fun.devicesStateIssueTopic(userId), json.dumps(devicesState))
+                        # mqtt_client.subscribe(fun.appSubscribeTopic(userId, jo.get("clientid")))
 
-        if jo.get("action") == "switch":
-            '''io 引脚控制'''
-            fun.switch_ctrl_(jo, devices)
-        elif jo.get("action") == "wifi":
-            '''配置wifi'''
-            fun.wifi_edit_issue_(jo, devices)
-        elif jo.get("action") == "pixel":
-            '''控制单个像素(每个设备只有一个pixel引脚)'''
-            fun.matrix_pixel_(jo, devices)
-        elif jo.get("action") == "pixel-fill":
-            '''清屏'''
-            fun.matrix_pixel_fill_(jo, devices)
+        elif topics[len(topics) - 1] == "disconnected":
+            jo = json.loads(msg.payload)
+            userName = jo.get("username")
+            userId = fun._getMd5(userName)
+            if jo.get("clientid")[- 3:] == "app":
+                if jo.get("clientid")[:-4] == userId:
+                    dataBase.User.query.filter(
+                        dataBase.User.user == userName, dataBase.User.delTime == None).update(
+                        {"state": False})
+                    db.session.commit()
+            else:
+                user = dataBase.User.query.filter(dataBase.User.user == userName, dataBase.User.delTime == None).first()
+                if user is not None:
+                    user.devices.filter(dataBase.Devices.delTime == None,
+                                        dataBase.Devices.devicesId == jo.get("clientid")).update(
+                        {"state": False})
+                    db.session.commit()
+                    if user.state:
+                        devices = user.devices.filter(dataBase.Devices.delTime == None).all()
+                        devicesState = {}
+                        for item in devices:
+                            devicesState.update({item.devicesId: item.state})
+                        mqtt_client.publish(fun.devicesStateIssueTopic(userId), json.dumps(devicesState))
+                        # mqtt_client.unsubscribe(fun.appSubscribeTopic(userId, jo.get("clientid")))
+
+        elif topics[len(topics) - 1] == "action" and topics[1] == "general":
+            devicesId = topics[len(topics) - 2]
+            generalId = topics[len(topics) - 3]
+            try:
+                jo = json.loads(msg.payload)
+            except:
+                return
+            devices = dataBase.User.query.filter(
+                dataBase.User.userId == generalId, dataBase.User.delTime == None
+            ).first().devices.filter(
+                dataBase.Devices.devicesId == devicesId, dataBase.Devices.delTime == None
+            ).first()
+
+            if devices is None:
+                return
+
+            if jo.get("action") == "switch":
+                '''io 引脚控制'''
+                fun.switch_ctrl_(jo, devices)
+            elif jo.get("action") == "wifi":
+                '''配置wifi'''
+                fun.wifi_edit_issue_(jo, devices)
+            elif jo.get("action") == "pixel":
+                '''控制单个像素(每个设备只有一个pixel引脚)'''
+                fun.matrix_pixel_(jo, devices)
+            elif jo.get("action") == "pixel-fill":
+                '''清屏'''
+                fun.matrix_pixel_fill_(jo, devices)
+            elif jo.get("action") == "pixel-bmp":
+                fun.matrix_pixel_bmp_(jo, devices)
 
 
 # 登录

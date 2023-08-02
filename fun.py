@@ -8,9 +8,14 @@ import json
 import time
 from datetime import datetime
 import random
-
+import base64
+import numpy as np
+import cv2
 
 # 生成设备状态下发话题
+from picTobase64 import PicAndBase64
+
+
 def devicesStateIssueTopic(userId: str) -> str:
     return "ks/server/general/" + userId + "/devices/state"
 
@@ -62,6 +67,18 @@ def _randomCode(num=5):
     for i in range(num):
         s += str(random.randint(0, 9))
     return s
+
+
+def rgb(r, g, b) -> bytes:
+    return (((r & 0xf8) << 8) | ((g & 0xfc) << 3) | (b >> 3)).to_bytes(2, byteorder="big", signed=False)
+
+
+# base64转cv2
+def base64_to_cv2(base64_code):
+    img_data = base64.b64decode(base64_code)
+    img_array = np.frombuffer(img_data, np.uint8)
+    img = cv2.imdecode(img_array, cv2.COLOR_RGB2BGR)
+    return img
 
 
 # 邮箱格式判断
@@ -121,8 +138,6 @@ def _checkToken(token):
 # 登录
 def login_():
     data = request.json
-    print(data)
-
     if 'user' not in data.keys() or 'pwd' not in data.keys():
         return _jsonToStr(code=400, msg="缺少参数")
 
@@ -233,7 +248,6 @@ def devices_list_():
         info['devicesType'] = i.devicesType
         info['picUrl'] = i.picUrl
         devices.append(info)
-    print(_jsonToStr(code=200, data={"devices": devices}))
     return _jsonToStr(code=200, data={"devices": devices})
 
 
@@ -547,7 +561,6 @@ def devices_authentication_():
         result["is_superuser"] = True
         return json.dumps(result), 200, {"Content-Type": "application/json"}
 
-    print(data)
     if 'user' not in data.keys() or 'pwd' not in data.keys() or "clientid" not in data.keys():
         return json.dumps(result), 404, {"Content-Type": "application/json"}
 
@@ -608,6 +621,7 @@ def switch_action(**kwargs):
         task.gpio.state = True if state == 0 else False
         db.session.commit()
 
+
 # 控制io口
 def switch_ctrl_(jo, devices: dataBase.Devices):
     # io 为 gpio表的ID
@@ -633,16 +647,59 @@ def wifi_edit_issue_(jo, devices: dataBase.Devices):
     pla = bytes([1, wifiRestart]) + bytes(wifi, "utf-8")
     mqtt_client.publish(devicesIssueTopic(devices.devicesId), pla)
 
+
 # 控制单个像素
 def matrix_pixel_(jo, devices: dataBase.Devices):
     a = {"action": "pixel", "data": {"x": 0, "y": 0, "color": [1, 1, 1]}}
-    pla = bytes([4, jo.get("data").get("x"), jo.get("data").get("y"),
-                 jo.get("data").get("color")[0], jo.get("data").get("color")[1], jo.get("data").get("color")[2]])
+    pla = bytes([4, jo.get("data").get("x"),
+                 jo.get("data").get("y")]) + rgb(jo.get("data").get("color")[0],
+                                                 jo.get("data").get("color")[1],
+                                                 jo.get("data").get("color")[2])
+    # pla = bytes([4, jo.get("data").get("x"), jo.get("data").get("y"),
+    #              jo.get("data").get("color")[0], jo.get("data").get("color")[1], jo.get("data").get("color")[2]])
     mqtt_client.publish(devicesIssueTopic(devices.devicesId), pla)
+
 
 # 清屏
 def matrix_pixel_fill_(jo, devices: dataBase.Devices):
-    pla = bytes([3, jo.get("data").get("color")[0], jo.get("data").get("color")[1], jo.get("data").get("color")[2]])
+    pla = bytes([3]) + rgb(jo.get("data").get("color")[0],
+                           jo.get("data").get("color")[1],
+                           jo.get("data").get("color")[2])
+
+    mqtt_client.publish(devicesIssueTopic(devices.devicesId), pla)
+
+
+# 显示图片
+def matrix_pixel_bmp_(jo, devices: dataBase.Devices):
+    # data = [
+    #     [[0, 1, 0], [255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59],
+    #      [0, 1, 0]],
+    #     [[255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59],
+    #      [255, 235, 59]],
+    #     [[255, 235, 59], [0, 0, 0], [0, 0, 0], [255, 235, 59], [255, 235, 59], [0, 0, 0], [0, 0, 0], [255, 235, 59]],
+    #     [[255, 235, 59], [255, 235, 59], [0, 0, 0], [255, 235, 59], [255, 235, 59], [255, 235, 59], [0, 0, 0],
+    #      [255, 235, 59]],
+    #     [[255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59],
+    #      [255, 235, 59]],
+    #     [[255, 235, 59], [255, 235, 59], [255, 235, 59], [0, 0, 0], [0, 0, 0], [0, 0, 0], [255, 235, 59],
+    #      [255, 235, 59]],
+    #     [[255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59],
+    #      [255, 235, 59]],
+    #     [[0, 1, 0], [255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59], [255, 235, 59],
+    #      [0, 1, 0]]
+    # ]
+    #
+    #
+    # pla = bytes([5, 0, 0, 8, 8])
+    #
+    # for i in data:
+    #     for j in i:
+    #         pla = pla + rgb(j[0], j[1], j[2])
+    #
+    # mqtt_client.publish(devicesIssueTopic(devices.devicesId), pla)
+
+    a = {"action": "pixel-bmp", "data": {"base64": ""}}
+    pla = bytes([5, 0, 0]) + PicAndBase64(jo.get("data").get("base64")).getBase64Pixel()
     mqtt_client.publish(devicesIssueTopic(devices.devicesId), pla)
 
 
@@ -689,9 +746,9 @@ if __name__ == '__main__':
 # print(gp)
 # type = dataBase.DevicesType.query.filter(dataBase.DevicesType.id == 1).first()
 # print(type.type.value)
-devices_ = dataBase.Devices.query.filter(dataBase.Devices.id == 1).first()
-print(devices_.user.user)
-
-task = dataBase.SwitchGpio.query.filter(dataBase.SwitchGpio.taskId == "2-1-287529",
-                                        dataBase.SwitchGpio.delTime == None).first()
-print(task.gpio.devices.devicesId)
+# devices_ = dataBase.Devices.query.filter(dataBase.Devices.id == 1).first()
+# print(devices_.user.user)
+#
+# task = dataBase.SwitchGpio.query.filter(dataBase.SwitchGpio.taskId == "2-1-287529",
+#                                         dataBase.SwitchGpio.delTime == None).first()
+# print(task.gpio.devices.devicesId)
