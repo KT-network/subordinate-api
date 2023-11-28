@@ -1,0 +1,28 @@
+# mysql 配置
+
+SQLALCHEMY_DATABASE_URI: mysql://whose:kunshao@192.168.1.150:3306/subordinate?charset=utf8mb4
+SQLALCHEMY_COMMIT_ON_TEARDOWN: true
+SQLALCHEMY_TRACK_MODIFICATIONS: true
+SQLALCHEMY_POOL_RECYCLE: 1800
+SQLALCHEMY_ENGINE_OPTIONS:
+  pool_pre_ping: true
+
+# 邮箱配置
+MAIL_SERVER: smtp.qq.com
+MAIL_PORT: 465
+MAIL_USE_SSL: true
+MAIL_USERNAME: kt_network@qq.com
+MAIL_PASSWORD: tkqcyxgdaisiddjh
+MAIL_DEFAULT_SENDER: kt_network@qq.com
+
+# redis配置
+REDIS_URL: redis://:kunshao@192.168.1.150:6379/0
+
+# mqtt配置
+MQTT_BROKER_URL: 192.168.1.150
+MQTT_BROKER_PORT: 1883
+MQTT_USERNAME: services
+MQTT_PASSWORD: 123456
+MQTT_KEEPALIVE: 5
+MQTT_TLS_ENABLED: false
+MQTT_CLIENT_ID: service
