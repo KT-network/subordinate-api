@@ -8,3 +8,9 @@ SQLAlchemy
 flask_mqtt
 flask_apscheduler
 apscheduler
+opencv-python
+pymysql
+paho-mqtt
+pillow
+uwsgi
+pika

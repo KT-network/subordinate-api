@@ -1,14 +1,130 @@
 import json
-from config import app, db, mqtt_client
+import time
+
+from config import app, db, mqtt_client, mq
 import fun
 import dataBase
+import logging
+
+
+def mq_call(ch, method, properties, body):
+    data = json.loads(body)
+    newData = data.copy()
+    print(fun._getTimeDate())
+    with app.app_context():
+        base = dataBase.SwitchGpio.query.filter(dataBase.SwitchGpio.id == data.get("id"),
+                                                dataBase.SwitchGpio.delTime == None).first()
+        print(1)
+        if base is None:
+            print("base不存在")
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            return
+        print(2)
+        if base.finish:
+            # 任务执行结束
+            print("任务执行结束")
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            return
+
+        print(3)
+        if base.destroyDate != -1 and base.destroyDate - int(time.time()) < 0:
+            print("执行时间结束")
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+            base.finish = True
+            db.session.commit()
+            return
+        print(4)
+
+        if base.lasting == 1:
+            print(5)
+            # 持久任务
+            if base.taskStart:
+                print(6)
+                # 任务以开始执行
+                if base.sectionCount > 1:
+                    print(7)
+                    delay = 86400
+                    base.sectionCount -= 1
+                    newData['sectionCount'] = base.sectionCount
+                    mq.send(json.dumps(newData), delay)
+                elif base.sectionCount == 1:
+                    print(8)
+                    # 不满足一天的时间
+                    delay = fun.dis_day(base.interval)
+                    base.sectionCount -= 1
+                    newData['sectionCount'] = base.sectionCount
+                    mq.send(json.dumps(newData), delay)
+                else:
+                    print(9)
+                    # 执行任务
+                    day = fun.seconds_to_time(base.interval)[0] + 1
+                    base.sectionCount = day
+                    newData['sectionCount'] = day
+                    fun.switch_action(base)
+                    mq.send(json.dumps(newData))
+                db.session.commit()
+            else:
+                # 任务还在等待开始阶段
+                if base.sectionCount > 1:
+                    delay = 86400
+                    base.sectionCount -= 1
+                    newData['sectionCount'] = base.sectionCount
+                    mq.send(json.dumps(newData), delay)
+                elif base.sectionCount == 1:
+                    # 不足一天
+                    t = base.startDate - base.date
+                    if t < 0:
+                        t = 0
+                    delay = fun.dis_day(t)
+                    base.sectionCount -= 1
+                    newData['sectionCount'] = base.sectionCount
+                    mq.send(json.dumps(newData), delay)
+                else:
+                    # 计数等0
+                    # 修改参数
+                    base.taskStart = True
+                    base.sectionCount = fun.seconds_to_time(base.interval)[0] + 1
+                    newData['sectionCount'] = base.sectionCount
+                    newData['taskStart'] = base.taskStart
+                    mq.send(json.dumps(newData))
+                db.session.commit()
+
+        elif base.lasting == 2:
+            if base.startDate < 0:
+                # 立即执行
+                base.taskStart = True
+                base.finish = True
+                fun.switch_action(base)
+            else:
+                # 有开始时间
+                if base.sectionCount > 1:
+                    delay = 86400
+                    base.sectionCount -= 1
+                    newData['sectionCount'] = base.sectionCount
+                    mq.send(json.dumps(newData), delay)
+                elif base.sectionCount == 1:
+                    t = base.startDate - base.date
+                    if t < 0:
+                        t = 0
+                    delay = fun.dis_day(t)
+                    base.sectionCount -= 1
+                    newData['sectionCount'] = base.sectionCount
+                    mq.send(json.dumps(newData), delay)
+                else:
+                    base.taskStart = True
+                    base.finish = True
+                    fun.switch_action(base)
+            db.session.commit()
+
+        ch.basic_ack(delivery_tag=method.delivery_tag)
 
 
 @mqtt_client.on_message()
 def handle_message(client, userdata, msg):
     topics = msg.topic.split("/")
-    with app.app_context():
+    print(topics)
 
+    with app.app_context():
         if topics[len(topics) - 1] == "connected":
             jo = json.loads(msg.payload)
             userName = jo.get("username")
@@ -34,6 +150,14 @@ def handle_message(client, userdata, msg):
                                         dataBase.Devices.devicesId == jo.get("clientid")).update(
                         {"state": True})
                     db.session.commit()
+                    devices_d = user.devices.filter(dataBase.Devices.delTime == None,
+                                                    dataBase.Devices.devicesId == jo.get("clientid")).first()
+                    for i in devices_d.gpio.filter(dataBase.Gpio.delTime == None).all():
+                        print(i)
+                        for j in i.switch.filter(dataBase.SwitchGpio.delTime == None).all():
+                            # scheduler.resume_job(j.taskId)
+                            print("上线")
+                            print(j.taskId)
                     if user.state:
                         devices = user.devices.filter(dataBase.Devices.delTime == None).all()
                         devicesState = {}
@@ -59,6 +183,15 @@ def handle_message(client, userdata, msg):
                                         dataBase.Devices.devicesId == jo.get("clientid")).update(
                         {"state": False})
                     db.session.commit()
+
+                    devices_d = user.devices.filter(dataBase.Devices.delTime == None,
+                                                    dataBase.Devices.devicesId == jo.get("clientid")).first()
+                    for i in devices_d.gpio.filter(dataBase.Gpio.delTime == None).all():
+                        for j in i.switch.filter(dataBase.SwitchGpio.delTime == None).all():
+                            # scheduler.pause_job(j.taskId)
+                            print("掉线")
+                            print(j.taskId)
+
                     if user.state:
                         devices = user.devices.filter(dataBase.Devices.delTime == None).all()
                         devicesState = {}
@@ -118,9 +251,9 @@ def register_verifyCode():
 
 
 # 获取某类型的一添加的所有设备列表
-@app.route('/devices/get/type/list/<type>', methods=['GET'])
-def devices_type_list(type):
-    return fun.devices_type_list_(type)
+# @app.route('/devices/get/type/list/<type>', methods=['GET'])
+# def devices_type_list(type):
+#     return fun.devices_type_list_(type)
 
 
 # 添加设备
@@ -142,7 +275,7 @@ def devices_gpio_task_add():
 
 
 # 删除设备
-@app.route('/devices/add', methods=["POST"])
+@app.route('/devices/del', methods=["POST"])
 def devices_del():
     return fun.devices_del_()
 
@@ -195,5 +328,37 @@ def devices_authentication():
     return a
 
 
+# 上传Bin文件
+@app.route('/ota/bin/upload', methods=["POST"])
+def ota_bin_upload():
+    pass
+
+
+# 获取多个更新信息（app检查更新）
+@app.route('/ota/info/gets', methods=["POST"])
+def ota_info_gets():
+    pass
+
+
+# 获取更新（设备检查更新）
+@app.route('/ota/get/<type>', methods=["GET"])
+def ota_info_get(type):
+    pass
+
+
+# ota下载
+@app.route('/download/ota/<type>/<name>/<code>', methods=["GET"])
+def download_ota(type, name, code):
+    pass
+
+
+@app.route('/test', methods=["GET"])
+def test():
+    return "succeed!"
+
+
 if __name__ == '__main__':
-    app.run("0.0.0.0", 1166)
+    # handler = logging.FileHandler('flask.log')
+    # app.logger.addHandler(handler)
+    mq.run(mq_call)
+    app.run("0.0.0.0", 1166, threaded=True)

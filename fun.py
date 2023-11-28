@@ -1,8 +1,11 @@
 import hashlib
+import os.path
 import re
 from threading import Thread
 
-from config import request, db, dbr, Message, mail, app, scheduler, mqtt_client
+import flask
+
+from config import request, db, dbr, Message, mail, app, mqtt_client, mq
 import dataBase
 import json
 import time
@@ -11,9 +14,60 @@ import random
 import base64
 import numpy as np
 import cv2
+# import magic
 
 # 生成设备状态下发话题
 from picTobase64 import PicAndBase64
+
+
+def time_to_seconds(days, hours, minutes, seconds):
+    '''
+    时间转秒
+    :param days: 天
+    :param hours: 时
+    :param minutes: 分
+    :param seconds: 秒
+    :return:
+    '''
+    total_seconds = (days * 24 * 60 * 60) + (hours * 60 * 60) + (minutes * 60) + seconds
+    return total_seconds
+
+
+def seconds_to_time(seconds):
+    '''
+    秒转天、时、分、秒
+    :param seconds: 秒
+    :return:
+    '''
+
+    # 计算天数
+    days = seconds // (24 * 60 * 60)
+
+    # 计算剩余秒数
+    remaining_seconds = seconds % (24 * 60 * 60)
+
+    # 计算小时
+    hours = remaining_seconds // (60 * 60)
+
+    # 计算剩余秒数
+    remaining_seconds %= (60 * 60)
+
+    # 计算分钟
+    minutes = remaining_seconds // 60
+
+    # 计算剩余秒数
+    seconds = remaining_seconds % 60
+
+    return days, hours, minutes, seconds
+
+
+def dis_day(seconds):
+    '''
+    不满足一天的计算
+    :param seconds: 秒
+    :return:
+    '''
+    return seconds % (24 * 60 * 60)
 
 
 def devicesStateIssueTopic(userId: str) -> str:
@@ -35,7 +89,7 @@ def _getTimeDate():
 
 def _getTimeDate_():
     current_datetime = datetime.now()
-    return current_datetime.replace(microsecond=0);
+    return current_datetime.replace(microsecond=0)
 
 
 def _getDate():
@@ -160,7 +214,6 @@ def login_():
         info['devicesId'] = i.devicesId
         info['devicesType'] = i.devicesType
         info['picUrl'] = i.picUrl
-
         devices.append(info)
     resData['devices'] = devices
     resData['token'] = _generateToken(data['user'], data['pwd'])
@@ -252,19 +305,19 @@ def devices_list_():
 
 
 # 获取某类型的一添加的所有设备列表
-def devices_type_list_(type):
-    if request.headers.get("UserToken") is None or type == "":
-        return _jsonToStr(code=400, msg="缺少必要参数")
-    token = request.headers['UserToken']
-    ids = _checkToken(token)
-    if ids == -1:
-        return _jsonToStr(code=405, msg="登录已过期")
-
-    devices_ = dataBase.Devices.query.filter_by(devicesType=type).all()
-    devices = []
-    for i in devices_:
-        devices.append(i.devicesId)
-    return _jsonToStr(code=200, data=devices)
+# def devices_type_list_(type):
+#     if request.headers.get("UserToken") is None or type == "":
+#         return _jsonToStr(code=400, msg="缺少必要参数")
+#     token = request.headers['UserToken']
+#     ids = _checkToken(token)
+#     if ids == -1:
+#         return _jsonToStr(code=405, msg="登录已过期")
+#
+#     devices_ = dataBase.Devices.query.filter_by(devicesType=type).all()
+#     devices = []
+#     for i in devices_:
+#         devices.append(i.devicesId)
+#     return _jsonToStr(code=200, data=devices)
 
 
 # 添加设备
@@ -313,30 +366,37 @@ def devices_add_():
 
 # 添加设备GPIO引脚
 def devices_gpio_add_():
-    if request.headers.get("UserToken") is None:
-        return _jsonToStr(code=400, msg="缺少必要参数")
-    token = request.headers['UserToken']
-    ids = _checkToken(token)
-    if ids == -1:
-        return _jsonToStr(code=405, msg="登录已过期")
-    data = request.json
-    devices = ids.devices.filter(dataBase.Devices.id == data['devicesId'],
-                                 dataBase.Devices.delTime == None).first()
-    if devices is None:
-        return _jsonToStr(code=400, msg="设备不存在")
+    try:
+        print(request.json)
+        if request.headers.get("UserToken") is None:
+            return _jsonToStr(code=400, msg="缺少必要参数")
+        token = request.headers['UserToken']
+        ids = _checkToken(token)
+        print(ids)
+        if ids == -1:
+            return _jsonToStr(code=405, msg="登录已过期")
+        data = request.json
+        print(data)
+        devices = ids.devices.filter(dataBase.Devices.id == data['devicesId'],
+                                     dataBase.Devices.delTime == None).first()
+        if devices is None:
+            return _jsonToStr(code=400, msg="设备不存在")
 
-    if devices.gpio.filter(dataBase.Gpio.io == data["io"], dataBase.Gpio.delTime == None).first() is not None:
-        return _jsonToStr(code=400, msg="子设备已存在")
+        if devices.gpio.filter(dataBase.Gpio.io == data["io"], dataBase.Gpio.delTime == None).first() is not None:
+            return _jsonToStr(code=400, msg="子设备已存在")
 
-    nowGpio = dataBase.Gpio(devicesId=devices.id,
-                            io=data['io'],
-                            name=data['name'],
-                            icon=data['icon'],
-                            type=dataBase.ConfigType.SWITCH if data['type'] == 0 else dataBase.ConfigType.PROGRAM,
-                            createTime=_getTimeDate_())
-    db.session.add(nowGpio)
-    db.session.commit()
-    return _jsonToStr(msg="添加成功")
+        nowGpio = dataBase.Gpio(devicesId=devices.id,
+                                io=data['io'],
+                                name=data['name'],
+                                icon=data['icon'],
+                                type=dataBase.ConfigType.SWITCH if data['type'] == 0 else dataBase.ConfigType.PROGRAM,
+                                createTime=_getTimeDate_())
+        db.session.add(nowGpio)
+        db.session.commit()
+        return _jsonToStr(msg="添加成功")
+    except Exception as a:
+        print(a)
+        return a
 
 
 # 添加设备Gpio引脚的任务
@@ -368,100 +428,46 @@ def devices_gpio_task_add_():
         value = dataBase.SwitchValue.FLICKER
     else:
         value = dataBase.SwitchValue.OPEN
-    taskId = create_task_id(gpio.devicesId, gpio.id)
+    # taskId = create_task_id(gpio.devicesId, gpio.id)
+
+    lasting = 2 if data.get("lasting") == 2 else 1
+
+    # if data.get('startDate') > 0:
+
+    taskStart = False if data.get("startDate") > 0 else True
+
+    if not taskStart:
+        m = data.get("startDate") - int(time.time())  # 未来时间减去当前时间
+
+        if m < 86400:
+            sectionCount = 0
+            # delay = m
+        else:
+            # delay = 86400
+            sectionCount = seconds_to_time(m)[0]
+    else:
+        sectionCount = seconds_to_time(data.get("interval"))[0] + 1
+        # delay = dis_day(data.get("interval"))
+
     switchGpio = dataBase.SwitchGpio(gpioId=gpio.id,
-                                     taskId=taskId,
                                      taskName=data.get("name"),
                                      value=value,
-                                     interval=json.dumps(data.get("interval")),
+                                     interval=data.get("interval"),
                                      lasting=data.get("lasting"),
                                      startDate=data.get("startDate"),
                                      destroyDate=data.get("destroyDate"),
+                                     taskStart=taskStart,
+                                     sectionCount=sectionCount,
                                      finish=False,
+                                     date=int(time.time()),
                                      createTime=_getTimeDate_())
 
-    if data.get("lasting") == 2:
-        """持久"""
-        if data.get("startDate") == -1:
-            if data.get("destroyDate") == -1:
-                scheduler.add_job(
-                    id=taskId,
-                    func=switch_action,
-                    trigger="cron",
-                    month="*" if data.get("interval").get("month") == 0 else data.get("interval").get(
-                        "month"),
-                    day="*" if data.get("interval").get("day") == 0 else data.get("interval").get(
-                        "day"),
-                    hour="*" if data.get("interval").get("hour") == 0 else data.get("interval").get(
-                        "hour"),
-                    minute="*" if data.get("interval").get("minute") == 0 else data.get("interval").get(
-                        "minute"),
-                    second="*" if data.get("interval").get("second") == 0 else data.get("interval").get(
-                        "second"),
-                    kwargs={"taskId": taskId}
-                )
-            else:
-                scheduler.add_job(
-                    id=taskId,
-                    func=switch_action,
-                    trigger="cron",
-                    month="*" if data.get("interval").get("month") == 0 else data.get("interval").get(
-                        "month"),
-                    day="*" if data.get("interval").get("day") == 0 else data.get("interval").get(
-                        "day"),
-                    hour="*" if data.get("interval").get("hour") == 0 else data.get("interval").get(
-                        "hour"),
-                    minute="*" if data.get("interval").get("minute") == 0 else data.get("interval").get(
-                        "minute"),
-                    second="*" if data.get("interval").get("second") == 0 else data.get("interval").get(
-                        "second"),
-                    end_date=data.get("destroyDate"),
-                    kwargs={"taskId": taskId}
-                )
-        else:
-            if data.get("destroyDate") == -1:
-                scheduler.add_job(
-                    id=taskId,
-                    func=switch_action,
-                    trigger="cron",
-                    month="*" if data.get("interval").get("month") == 0 else data.get("interval").get(
-                        "month"),
-                    day="*" if data.get("interval").get("day") == 0 else data.get("interval").get(
-                        "day"),
-                    hour="*" if data.get("interval").get("hour") == 0 else data.get("interval").get(
-                        "hour"),
-                    minute="*" if data.get("interval").get("minute") == 0 else data.get("interval").get(
-                        "minute"),
-                    second="*" if data.get("interval").get("second") == 0 else data.get("interval").get(
-                        "second"),
-                    start_date=data.get("startDate"),
-                    kwargs={"taskId": taskId}
-                )
-            else:
-                scheduler.add_job(
-                    id=taskId,
-                    func=switch_action,
-                    trigger="cron",
-                    month="*" if data.get("interval").get("month") == 0 else data.get("interval").get(
-                        "month"),
-                    day="*" if data.get("interval").get("day") == 0 else data.get("interval").get(
-                        "day"),
-                    hour="*" if data.get("interval").get("hour") == 0 else data.get("interval").get(
-                        "hour"),
-                    minute="*" if data.get("interval").get("minute") == 0 else data.get("interval").get(
-                        "minute"),
-                    second="*" if data.get("interval").get("second") == 0 else data.get("interval").get(
-                        "second"),
-                    start_date=data.get("startDate"),
-                    end_date=data.get("destroyDate"),
-                    kwargs={"taskId": taskId}
-                )
-    elif data.get("lasting") == 1:
-        """定时一次"""
-        scheduler.add_job(id=taskId, func=switch_action, trigger="date", run_date=data.get("startDate"),
-                          kwargs={"taskId": taskId})
-
     db.session.add(switchGpio)
+    db.session.flush()
+    # print(switchGpio.json())
+    mq.send(switchGpio.json())
+
+
     db.session.commit()
 
     return _jsonToStr(msg="添加成功")
@@ -477,7 +483,20 @@ def devices_del_():
         return _jsonToStr(code=405, msg="登录已过期")
     data = request.json
 
-    dataBase.Devices.query.filter(dataBase.Devices.devicesId == "").update()
+    devices = ids.devices.filter(dataBase.Devices.delTime == None,
+                                 dataBase.Devices.devicesId == data.get("devicesId")).first()
+
+    # devices = dataBase.Devices.query.filter(dataBase.Devices.devicesId == "",dataBase.Devices.delTime == None).first()
+    # 设备下的gpio
+    for i in devices.gpio.filter(dataBase.Gpio.delTime == None).all():
+        # gpio下的任务
+        for j in i.switch.filter(dataBase.SwitchGpio.delTime == None).all():
+            # scheduler.remove_job(j.taskId)
+            j.delTime = _getTimeDate_()
+        i.delTime = _getTimeDate_()
+    devices.delTime = _getTimeDate_()
+    db.session.commit()
+    return _jsonToStr(msg="删除成功")
 
 
 # 获取设备类型列表
@@ -527,8 +546,67 @@ def devices_type_add_():
                                   size=dataT['size'],
                                   createTime=_getTimeDate_())
     db.session.add(dataDT)
+    db.session.commit()
 
     return _jsonToStr(data="添加成功")
+
+
+# 设备详情
+def devices_info_():
+    if request.headers.get("UserToken") is None:
+        return _jsonToStr(code=400, msg="缺少必要参数")
+    token = request.headers['UserToken']
+    ids = _checkToken(token)
+    if ids == -1:
+        return _jsonToStr(code=405, msg="登录已过期")
+    data = request.json
+    if data.get("id") is None:
+        return _jsonToStr(code=400, msg="缺少必要参数")
+    info = {"gpio": []}
+    devices = ids.devices.filter(dataBase.Devices.id == int(data.get("id")),
+                                 dataBase.Devices.delTime == None).first()
+    if devices is None:
+        return _jsonToStr(code=400, msg="设备不存在")
+    devicesType = dataBase.DevicesType.query.filter(dataBase.DevicesType.id == devices.devicesType).first()
+
+    gpio_list = []
+    for gpio_ in devices.gpio.filter(dataBase.Gpio.delTime == None).all():
+        gpio_d = {}
+        gpio_d.update({"id": gpio_.id})
+        gpio_d.update({"io": gpio_.io})
+        gpio_d.update({"name": gpio_.name})
+        gpio_d.update({"icon": gpio_.icon})
+        gpio_d.update({"type": gpio_.type})
+        s_list = []
+        for s in gpio_.switch.filter(dataBase.SwitchGpio.delTime == None).all():
+            s_d = {}
+            s_d.update({"id": s.id})
+            s_d.update({"taskId": s.taskId})
+            s_d.update({"taskName": s.taskName})
+            s_d.update({"value": s.value})
+            s_d.update({"interval": s.interval})
+            s_d.update({"lasting": s.lasting})
+            s_d.update({"startDate": s.startDate})
+            s_d.update({"destroyDate": s.destroyDate})
+            s_d.update({"finish": s.finish})
+            s_d.update({"interval": s.interval})
+            s_list.append(s_d)
+
+        gpio_d.update({"task": s_list})
+
+        gpio_list.append(gpio_d)
+    info['gpio'] = gpio_list
+    info.update({"name": devices.name})
+    info.update({"devicesId": devices.devicesId})
+    info.update({"type": {"typeName": devicesType.typeName, "type": devicesType.type.value,
+                          "picUrl": devicesType.picUrl, "size": devicesType.size}})
+
+    # info.update({"type": {"typeName": devices.devicesType.typeName}})
+    # info.update({"type": {"type": devices.devicesType.type}})
+    # info.update({"type": {"picUrl": devices.devicesType.picUrl}})
+    # info.update({"type": {"size": devices.devicesType.size}})
+
+    return _jsonToStr(data=info)
 
 
 # 修改设备名称
@@ -595,24 +673,116 @@ def devices_authentication_():
     return json.dumps(result), 200, {"Content-Type": "application/json"}
 
 
-def switch_action(**kwargs):
-    taskId = kwargs['taskId']
+# 上传Bin文件
+def ota_bin_upload_():
+    fields = ['type', 'versions', 'md5', 'explain', 'fileName', 'compel']
+    if request.headers.get("UserToken") is None:
+        return _jsonToStr(code=400, msg="缺少必要参数")
+    token = request.headers['UserToken']
+    ids = _checkToken(token)
+    if ids == -1:
+        return _jsonToStr(code=405, msg="登录已过期")
+    data = request.form
 
-    task = dataBase.SwitchGpio.query.filter(dataBase.SwitchGpio.taskId == taskId,
-                                            dataBase.SwitchGpio.delTime == None).first()
+    if ids.role.value != 0:
+        return _jsonToStr(code=400, msg="无权限")
+
+    if 'type' not in data.keys():
+        return _jsonToStr(code=400, msg="缺少必要参数")
+
+    binType = dataBase.DevicesType.query.filter(dataBase.DevicesType.typeName == data.get('type'),
+                                                dataBase.DevicesType.delTime == None).first()
+    bin = dataBase.OtaBin.query.filter(dataBase.OtaBin.type == binType.id, dataBase.OtaBin.delTime == None).all()
+
+    if 'versions' not in data.keys():
+        if len(bin) != 0:
+            versions = bin[-1].versions + 1
+        else:
+            versions = 1.0
+    else:
+        versions = data.get("versions")
+
+    file = request.files['file']
+    if file.filename == '':
+        return _jsonToStr(code=400, msg="未上传文件")
+    md5_hash = hashlib.md5()
+    md5_hash.update(file.stream.read())
+    file_md5 = md5_hash.hexdigest()
+
+    file.save(os.path.join(app.config['DEVICES_UPDATE_BIN_PATH'], file_md5 + '.bin'))
+
+    now = dataBase.OtaBin(type=binType.id,
+                          versions=versions,
+                          md5=file_md5,
+                          explain=data.get("explain") if 'explain' in data.keys() else None,
+                          fileName=file_md5 + ".bin",
+                          fileSize=file.content_length,
+                          compel=data.get("compel") if 'compel' in data.keys() else dataBase.UpdateType.OFFICIAL.value,
+                          createTime=_getTimeDate_())
+    db.session.add(now)
+
+    return _jsonToStr(data="上传成功")
+
+
+def ota_info_get_(type):
+    t = dataBase.DevicesType.query.filter(dataBase.DevicesType.typeName == type,
+                                          dataBase.DevicesType.delTime == None).first()
+    if t is None:
+        return _jsonToStr(code=400, msg="无类型更新")
+    ota = dataBase.OtaBin.query.filter_by(type=t.id, delTime=None).order_by(dataBase.OtaBin.versions.desc()).first()
+    if ota is None:
+        return _jsonToStr(code=400, msg="暂无更新")
+    ret = {'versions': ota.versions, "md5": ota.md5, 'type': t.typeName, 'compel': ota.value, 'name': ota.fileName}
+
+    return _jsonToStr(data=ret)
+
+
+# ota下载，设备类型，文件名称，下载码
+def download_ota_(otaType, fileName, code):
+    verify = ['66535', '2023', '147', 'kun', 'osdf']
+
+    if code not in verify or code is None or code == '':
+        return _jsonToStr(code=400, msg="下载码错误")
+
+    type = dataBase.DevicesType.query.filter(dataBase.DevicesType.typeName == otaType,
+                                             dataBase.DevicesType.delTime == None).first()
+    if type is None:
+        return _jsonToStr(code=400, msg="无类型更新")
+
+    ota = dataBase.OtaBin.query.filter(dataBase.OtaBin.type == type.id, dataBase.OtaBin.fileName == fileName,
+                                       dataBase.OtaBin.delTime == None).first()
+    if ota is None:
+        return _jsonToStr(code=400, msg="无类型更新")
+
+    ota.downloadNum += 1
+    db.session.commit()
+    return flask.send_from_directory(app.config.get('DEVICES_UPDATE_BIN_PATH'),
+                                     ota.fileName + ".bin",
+                                     as_attachment=True)
+    # return flask.send_file(os.path.join(app.config.get('DEVICES_UPDATE_BIN_PATH'), ota.fileName + ".bin"),
+    #                        as_attachment=True)
+
+
+def switch_action(task):
+    # taskId = kwargs['taskId']
+
+    # task = dataBase.SwitchGpio.query.filter(dataBase.SwitchGpio.taskId == taskId,
+    #                                         dataBase.SwitchGpio.delTime == None).first()
+
+    print(task.value)
     if task is None:
         return
     if task.value == dataBase.SwitchValue.OPEN:
         pla = bytes([2, task.gpio.io, 0])
         mqtt_client.publish(devicesIssueTopic(task.gpio.devices.devicesId), pla)
         task.gpio.state = True
-        db.commit()
+        db.session.commit()
 
     elif task.value == dataBase.SwitchValue.CLOSE:
         pla = bytes([2, task.gpio.io, 1])
         mqtt_client.publish(devicesIssueTopic(task.gpio.devices.devicesId), pla)
         task.gpio.state = False
-        db.commit()
+        db.session.commit()
 
     elif task.value == dataBase.SwitchValue.FLICKER:
         state = 0 if task.gpio.state == False else 1
@@ -704,51 +874,95 @@ def matrix_pixel_bmp_(jo, devices: dataBase.Devices):
 
 
 if __name__ == '__main__':
-    pass
-# 子查父
-# de = dataBase.Devices.query.filter_by(id=1).first()
-# print(de.user.user)
-#
+    # 子查父
+    # de = dataBase.Devices.query.filter_by(id=1).first()
+    # print(de.user.user)
+    #
 
-# user = dataBase.User.query.filter_by(id=1).first()
-#
-# dataBase.Devices.query.filter(dataBase.Devices.devicesId == "1-9").update({"delTime": "2023-07-12 23:52:19"},
-#                                                                           synchronize_session=False)
-# db.session.commit()
-#
-# print(user.devices.first().devicesId)
+    # user = dataBase.User.query.filter_by(id=1).first()
+    #
+    # dataBase.Devices.query.filter(dataBase.Devices.devicesId == "1-9").update({"delTime": "2023-07-12 23:52:19"},
+    #                                                                           synchronize_session=False)
+    # db.session.commit()
+    #
+    # print(user.devices.first().devicesId)
 
-# # 夫查子
-# user = dataBase.User.query.filter_by(id=1).first()
-# print(user.devices.filter(dataBase.Devices.id == 2,dataBase.Devices.delTime != None).update({"name": "二坤1"}))
-# db.session.commit()
+    # # 夫查子
+    # user = dataBase.User.query.filter_by(id=1).first()
+    # print(user.devices.filter(dataBase.Devices.id == 2,dataBase.Devices.delTime != None).update({"name": "二坤1"}))
+    # db.session.commit()
 
-#
-# devices_ = dataBase.Devices.query.all()
-# print(devices_)
-#
-# print(dataBase.User.query.filter_by(email="841369846@qq.com").count())
+    #
+    # devices_ = dataBase.Devices.query.all()
+    # print(devices_)
+    #
+    # print(dataBase.User.query.filter_by(email="841369846@qq.com").count())
 
-# devices_ = dataBase.DevicesType.query.filter(dataBase.DevicesType.delTime == None).all()
-# print(devices_)
-#
-# print(_getTimeDate_())
-# userId = dataBase.User.query.filter_by(user="841369846", delTime=None).first()
-# print(userId.devices.filter(dataBase.Devices.delTime == None).all()[0].devicesId)
-# a = dataBase.Devices.query.filter(dataBase.Devices.devicesId == "203d74f95560",
-#                                   dataBase.Devices.delTime == None).all()
-#
-# print(a)
-# ids = _checkToken("b739d352776579b3f75245069b058a53")
-# de = ids.devices.filter(dataBase.Devices.id == 1).first()
-# print(de)
-# gp = de.gpio.filter(dataBase.Gpio.io == 1).first()
-# print(gp)
-# type = dataBase.DevicesType.query.filter(dataBase.DevicesType.id == 1).first()
-# print(type.type.value)
-# devices_ = dataBase.Devices.query.filter(dataBase.Devices.id == 1).first()
-# print(devices_.user.user)
-#
-# task = dataBase.SwitchGpio.query.filter(dataBase.SwitchGpio.taskId == "2-1-287529",
-#                                         dataBase.SwitchGpio.delTime == None).first()
-# print(task.gpio.devices.devicesId)
+    # devices_ = dataBase.DevicesType.query.filter(dataBase.DevicesType.delTime == None).all()
+    # print(devices_)
+    #
+    # print(_getTimeDate_())
+    # userId = dataBase.User.query.filter_by(user="841369846", delTime=None).first()
+    # print(userId.devices.filter(dataBase.Devices.delTime == None).all()[0].devicesId)
+    # a = dataBase.Devices.query.filter(dataBase.Devices.devicesId == "203d74f95560",
+    #                                   dataBase.Devices.delTime == None).all()
+    #
+    # print(a)
+    # ids = _checkToken("b739d352776579b3f75245069b058a53")
+    # de = ids.devices.filter(dataBase.Devices.id == 1).first()
+    # print(de)
+    # gp = de.gpio.filter(dataBase.Gpio.io == 1).first()
+    # print(gp)
+    # type = dataBase.DevicesType.query.filter(dataBase.DevicesType.id == 1).first()
+    # print(type.type.value)
+    # devices_ = dataBase.Devices.query.filter(dataBase.Devices.id == 1).first()
+    # print(devices_.user.user)
+    #
+    # task = dataBase.SwitchGpio.query.filter(dataBase.SwitchGpio.taskId == "2-1-287529",
+    #                                         dataBase.SwitchGpio.delTime == None).first()
+    # print(task.gpio.devices.devicesId)
+    user = dataBase.User.query.filter(dataBase.User.user == "841369846", dataBase.User.delTime == None).first()
+    devices = user.devices.filter(dataBase.Devices.id == 11,
+                                  dataBase.Devices.delTime == None).first()
+    info = {"gpio": []}
+    devicesType = dataBase.DevicesType.query.filter(dataBase.DevicesType.id == devices.devicesType).first()
+    gpio_list = []
+    for gpio_ in devices.gpio.filter(dataBase.Gpio.delTime == None).all():
+        gpio_d = {}
+        gpio_d.update({"id": gpio_.id})
+        gpio_d.update({"io": gpio_.io})
+        gpio_d.update({"name": gpio_.name})
+        gpio_d.update({"icon": gpio_.icon})
+        gpio_d.update({"type": gpio_.type.value})
+        s_list = []
+        for s in gpio_.switch.filter(dataBase.SwitchGpio.delTime == None).all():
+            s_d = {}
+            s_d.update({"id": s.id})
+            s_d.update({"taskId": s.taskId})
+            s_d.update({"taskName": s.taskName})
+            s_d.update({"value": s.value.value})
+            s_d.update({"interval": json.loads(s.interval)})
+            s_d.update({"lasting": s.lasting})
+            s_d.update({"startDate": s.startDate})
+            s_d.update({"destroyDate": s.destroyDate})
+            s_d.update({"finish": s.finish})
+            s_list.append(s_d)
+
+        gpio_d.update({"task": s_list})
+
+        gpio_list.append(gpio_d)
+    info.update({"name": devices.name})
+    info.update({"devicesId": devices.devicesId})
+    info['gpio'] = gpio_list
+
+    info.update({"type": {"typeName": devicesType.typeName, "type": devicesType.type.value,
+                          "picUrl": devicesType.picUrl, "size": devicesType.size}})
+    # info.update({"type": {}})
+    # info.update({"type": {"picUrl": devicesType.picUrl}})
+    # info.update({"type": {"size": devicesType.size}})
+
+    print(info)
+
+    # devices_d = user.devices.filter(dataBase.Devices.delTime == None,
+    #                                 dataBase.Devices.devicesId == "pc-test").first()
+    # print(devices_d.gpio.filter(dataBase.Gpio.delTime == None).all()[0].switch.all()[0].taskId)
