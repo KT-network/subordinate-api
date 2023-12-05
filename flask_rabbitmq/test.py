@@ -1,5 +1,5 @@
 from flask import Flask
-from flask_RabbitMQ import RabbitMQ
+from flask_rabbitmq import RabbitMQ
 
 app = Flask(__name__)
 

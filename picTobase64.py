@@ -84,7 +84,3 @@ class PicAndBase64:
             for j in i:
                 value += self._rgb_to_bytes(int(j[0]), int(j[1]), int(j[2]))
         return value
-
-
-a = PicAndBase64(
-    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAXklEQVQYlWNgYGb4D8If+lix0owghkDpb4YP3awMyAAkBgKMYN3drAz8xkwoCj6e/QemmZB1vvvMBMYwADKFCWYUNgDSzIJsghAvxFhkE8BugKlGl4SI4fEiAzPDfwCUAjkVT37yGwAAAABJRU5ErkJggg==").getBase64Pixel()

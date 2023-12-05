@@ -119,6 +119,11 @@ def mq_call(ch, method, properties, body):
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
 
+
+@mqtt_client.on_connect()
+def connect(a,b,c,d):
+    print(d)
+
 @mqtt_client.on_message()
 def handle_message(client, userdata, msg):
     topics = msg.topic.split("/")
@@ -131,20 +136,25 @@ def handle_message(client, userdata, msg):
             userId = fun._getMd5(userName)
             if jo.get("clientid")[- 3:] == "app":
                 if jo.get("clientid")[:-4] == userId:
-                    dataBase.User.query.filter(dataBase.User.user == userName, dataBase.User.delTime == None).update(
+
+                    dataBase.User.query.filter(
+                        (dataBase.User.account == userName) | (dataBase.User.email == userName),
+                        dataBase.User.delTime == None).update(
                         {"state": True})
                     db.session.commit()
 
                     devices = dataBase.User.query.filter(
-                        dataBase.User.user == userName, dataBase.User.delTime == None
-                    ).first().devices.filter(
+                        (dataBase.User.account == userName) | (dataBase.User.email == userName),
+                        dataBase.User.delTime == None).first().devices.filter(
                         dataBase.Devices.delTime == None).all()
                     devicesState = {}
                     for item in devices:
                         devicesState.update({item.devicesId: item.state})
                     mqtt_client.publish(fun.devicesStateIssueTopic(userId), json.dumps(devicesState))
             else:
-                user = dataBase.User.query.filter(dataBase.User.user == userName, dataBase.User.delTime == None).first()
+                user = dataBase.User.query.filter(
+                    (dataBase.User.account == userName) | (dataBase.User.email == userName),
+                    dataBase.User.delTime == None).first()
                 if user is not None:
                     user.devices.filter(dataBase.Devices.delTime == None,
                                         dataBase.Devices.devicesId == jo.get("clientid")).update(
@@ -173,11 +183,14 @@ def handle_message(client, userdata, msg):
             if jo.get("clientid")[- 3:] == "app":
                 if jo.get("clientid")[:-4] == userId:
                     dataBase.User.query.filter(
-                        dataBase.User.user == userName, dataBase.User.delTime == None).update(
+                        (dataBase.User.account == userName) | (dataBase.User.email == userName),
+                        dataBase.User.delTime == None).update(
                         {"state": False})
                     db.session.commit()
             else:
-                user = dataBase.User.query.filter(dataBase.User.user == userName, dataBase.User.delTime == None).first()
+                user = dataBase.User.query.filter(
+                    (dataBase.User.account == userName) | (dataBase.User.email == userName),
+                    dataBase.User.delTime == None).first()
                 if user is not None:
                     user.devices.filter(dataBase.Devices.delTime == None,
                                         dataBase.Devices.devicesId == jo.get("clientid")).update(
@@ -296,9 +309,9 @@ def devices_info():
 # 创建数据库
 @app.route('/creation/database', methods=["GET"])
 def creation_dataBase():
-    db.drop_all()
-    db.create_all()
-    return "succeed!"
+    # db.drop_all()
+    # db.create_all()
+    return "succeed! 以弃用"
 
 
 # 获取设备类型
@@ -361,4 +374,27 @@ if __name__ == '__main__':
     # handler = logging.FileHandler('flask.log')
     # app.logger.addHandler(handler)
     mq.run(mq_call)
-    app.run("0.0.0.0", 1166, threaded=True)
+    app.run()
+
+    """
+    更新log
+    
+    2023-12之前:
+        更新了设备任务（设备任务采用RabbitMq的延时插件执行）
+    2023-12-3:
+        预计更新登录注册
+            登录:在登录后将生成长久的Token，也就是说在不从新登录，Token将不会过期
+            注册:注册将采用邮箱注册，账号将由系统分配
+    
+    整体完成后:
+        Api请求将添加校验:
+            预设校验:
+                时间校验，时间差不超过5秒（时间戳）
+                
+                参数md5校验
+                
+                随机数校验，随机数将缓存到redis中，每次请求检查随机数，不存在请求通过，写入随机数到redis中
+                
+                待定...
+                
+    """

@@ -2,12 +2,13 @@ import threading
 from typing import Callable
 
 import pika
+from flask import Flask
 
 
 class RabbitMQ(object):
-    def __init__(self, app=None):
+    def __init__(self, app: Flask = None):
         self.app = app
-        self.config = self.app.config
+        # self.config = self.app.config
 
         self.rabbitmq_server_host = None
         self.rabbitmq_server_username = None
@@ -23,25 +24,29 @@ class RabbitMQ(object):
         self._exchange = None
         self._queue = None
 
-        self.init()
+        if app is not None:
+            self.init_app(app)
 
-    def init(self):
+    def init_app(self, app: Flask):
+        if self.app is None:
+            self.app = app
+
         self.valid_config()
         self.connect_rabbitmq_server()
         # self._channel_c.basic_consume(queue='server', on_message_callback=self.on_consumer, auto_ack=True)
 
     def valid_config(self):
-        if not self.config.get('RABBITMQ_HOST'):
+        if not self.app.config.get('RABBITMQ_HOST'):
             raise Exception("The rabbitMQ application must configure host.")
-        self.rabbitmq_server_host = self.config.get('RABBITMQ_HOST')
-        self.rabbitmq_server_username = self.config.get('RABBITMQ_USERNAME')
-        self.rabbitmq_server_password = self.config.get('RABBITMQ_PASSWORD')
-        self.rabbitmq_server_virtual_host = '/' if self.config.get(
-            "RABBITMQ_VIRTUAL_HOST") is None else self.config.get("RABBITMQ_VIRTUAL_HOST")
+        self.rabbitmq_server_host = self.app.config.get('RABBITMQ_HOST')
+        self.rabbitmq_server_username = self.app.config.get('RABBITMQ_USERNAME')
+        self.rabbitmq_server_password = self.app.config.get('RABBITMQ_PASSWORD')
+        self.rabbitmq_server_virtual_host = '/' if self.app.config.get(
+            "RABBITMQ_VIRTUAL_HOST") is None else self.app.config.get("RABBITMQ_VIRTUAL_HOST")
         # self.rabbitmq_server_delay_msg = False if self.config.get("RABBITMQ_DELAY_MSG") is None else True
-        self.rabbitmq_server_delay_msg_mode = self.config.get("RABBIT_DELAY_MSG_MODE")
-        self._queue = self.config.get("RABBIT_QUEUE")
-        self._exchange = self.config.get("RABBIT_EXCHANGE")
+        self.rabbitmq_server_delay_msg_mode = self.app.config.get("RABBIT_DELAY_MSG_MODE")
+        self._queue = self.app.config.get("RABBIT_QUEUE")
+        self._exchange = self.app.config.get("RABBIT_EXCHANGE")
 
     def connect_rabbitmq_server(self):
 

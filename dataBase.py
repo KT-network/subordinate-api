@@ -39,7 +39,8 @@ class UpdateType(Enum):
 class User(db.Model):
     __tablename__ = 'user'
     id = db.Column(db.Integer, primary_key=True)  # 数据id
-    user = db.Column(db.String(11), nullable=False)
+    account = db.Column(db.String(11),nullable=False)  # 系统分配的账号
+    # user = db.Column(db.String(11), nullable=False)
     userId = db.Column(db.String(255), nullable=False)
     passwd = db.Column(db.String(255), nullable=False)
     email = db.Column(db.String(50), nullable=False)

@@ -164,9 +164,13 @@ def _sendEmail(email, msg):
 
 # 生成Token
 def _generateToken(user, pwd):
+    tok = dbr.get(user)
+    if tok is not None:
+        a = dbr.delete(tok)
+        print(tok,a)
     token = _getMd5(user + '-' + pwd + str(_getTimeInt()))
-    dbr.set(token, user, ex=18000)
-    dbr.set(user, token, ex=18000)
+    dbr.set(token, user)
+    dbr.set(user, token)
     return token
 
 
@@ -183,7 +187,7 @@ def _checkToken(token):
 
     if token != isToken.decode():
         return -1
-    userId = dataBase.User.query.filter_by(user=user.decode(), delTime=None).first()
+    userId = dataBase.User.query.filter_by(account=user.decode(), delTime=None).first()
     if userId is None:
         return -1
     return userId
@@ -198,9 +202,10 @@ def login_():
     if '' in data.values() or '' in data.values():
         return _jsonToStr(code=400, msg="参数不能为空")
 
-    md5Pwd = _getMd5(data['user'] + "-/-" + data['pwd'])
+    md5Pwd = _getMd5(data['pwd'] + "-/- whose")
 
-    users = dataBase.User.query.filter(dataBase.User.user == data['user'],
+
+    users = dataBase.User.query.filter((dataBase.User.account == data['user']) | (dataBase.User.email == data['user']),
                                        dataBase.User.passwd == md5Pwd, dataBase.User.delTime == None).first()
 
     if users is None:
@@ -216,33 +221,44 @@ def login_():
         info['picUrl'] = i.picUrl
         devices.append(info)
     resData['devices'] = devices
-    resData['token'] = _generateToken(data['user'], data['pwd'])
+    resData['token'] = _generateToken(users.account, data['pwd'])
 
     return _jsonToStr(data=resData)
 
 
 # 注册
 def register_():
+    def createAccount():
+        alist = [0] * 10
+        for i in range(len(alist)):
+            alist[i] = random.randint(10021, 99999)
+        acc = random.sample(alist,1)[0]
+        if dataBase.User.query.filter(dataBase.User.account == str(acc)).count() == 0:
+            return str(acc)
+        return createAccount()
+
     data = request.json
-    if 'user' not in data.keys() or 'email' not in data.keys() or 'code' not in data.keys() or 'pwd' not in data.keys():
+    if 'email' not in data.keys() or 'code' not in data.keys() or 'pwd' not in data.keys():
         return _jsonToStr(code=400, msg="缺少参数")
     if '' in data.values() or '' in data.values():
         return _jsonToStr(code=400, msg="参数不能为空")
 
-    verifyCode = dbr.get(data['user'] + "***" + data['email'])
+    verifyCode = dbr.get("verifyCode"+"-->" + data['email'])
     if verifyCode is None:
         return _jsonToStr(code=400, msg="验证码已过期，验证码错误")
 
     if verifyCode == data['code']:
         return _jsonToStr(code=400, msg="验证码已过期，验证码错误")
     try:
-        md5Pwd = _getMd5(data['user'] + "-/-" + data['pwd'])
+        md5Pwd = _getMd5(data['pwd'] + "-/- whose")
+        acc = createAccount()
         db.session.add(
-            dataBase.User(user=data['user'], userId=_getMd5(data['user']), passwd=md5Pwd, email=data['email'],
+            dataBase.User(account=acc, userId=_getMd5(acc), passwd=md5Pwd, email=data['email'],
                           createTime=_getTimeDate_()))
         db.session.commit()
-        dbr.delete(data['code'])
-        token = _generateToken(data['user'], data['pwd'])
+        dbr.delete("verifyCode"+"-->" + data['email'])
+        dbr.delete(data['email'])
+        token = _generateToken(acc, data['pwd'])
         return _jsonToStr(data={"token": token})
     except Exception as e:
         print(e)
@@ -253,7 +269,7 @@ def register_():
 def register_verifyCode_():
     try:
         data = request.json
-        if 'user' not in data.keys() or 'email' not in data.keys():
+        if 'email' not in data.keys():
             return _jsonToStr(code=400, msg="缺少参数")
 
         if '' in data.values() or '' in data.values():
@@ -265,12 +281,11 @@ def register_verifyCode_():
         if dbr.get(data['email']) is not None:
             return _jsonToStr(code=400, msg="请求频繁，稍后再试")
 
-        if dataBase.User.query.filter_by(user=data['user']).count() != 0 or \
-                dataBase.User.query.filter_by(email=data['email']).count() != 0:
-            return _jsonToStr(code=400, msg="账号或邮箱已被注册过")
+        if dataBase.User.query.filter_by(email=data['email']).count() != 0:
+            return _jsonToStr(code=400, msg="邮箱已被注册过")
         code = _randomCode()
 
-        dbr.set(data['user'] + "***" + data['email'], code, ex=300)
+        dbr.set("verifyCode"+"-->" + data['email'], code, ex=300)
         emailMsg = '你正在使用邮箱：' + data['email'] + '注册App。\n\n验证码为：' + code + '\n（验证码有效期为5分钟）\n\n如非本人操作请忽略。'
 
         if not _sendEmail(data['email'], emailMsg):
@@ -644,11 +659,9 @@ def devices_authentication_():
 
     if '' in data.values() or '' in data.values():
         return json.dumps(result), 404, {"Content-Type": "application/json"}
-
-    md5Pwd = _getMd5(data['user'] + "-/-" + data['pwd'])
-
-    users = dataBase.User.query.filter(dataBase.User.user == data['user'],
-                                       dataBase.User.passwd == md5Pwd).first()
+    md5Pwd = _getMd5(data['pwd'] + "-/- whose")
+    users = dataBase.User.query.filter((dataBase.User.account == data['user']) | (dataBase.User.email == data['user']),
+                                       dataBase.User.passwd == md5Pwd, dataBase.User.delTime == None).first()
 
     if users is None:
         return json.dumps(result), 404, {"Content-Type": "application/json"}
