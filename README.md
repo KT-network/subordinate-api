@@ -1,7 +1,9 @@
 # 谁的部下-服务端
 
 **关联项目：**
+
 [谁的部下-Android](https://github.com/KT-network/subordinate)
+
 [部下-设备](https://github.com/KT-network/subordinate-esp32)
 
 **需要的第三方服务：**
