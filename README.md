@@ -1,5 +1,9 @@
 # 谁的部下-服务端
 
+**api文档：**
+
+[文档](https://console-docs.apipost.cn/preview/1018646bc0731d14/568487a7e7010728)
+
 **关联项目：**
 
 [谁的部下-Android](https://github.com/KT-network/subordinate)
