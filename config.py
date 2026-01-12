@@ -86,16 +86,16 @@ app = create_app('config.yaml')
 # # -------------邮箱配置----------------
 #
 # # 如果是qq邮箱这里应该为"smtp.qq.com"
-# app.config['MAIL_SERVER'] = "smtp.qq.com"
+# app.config['MAIL_SERVER'] = ""
 # # 如果使用ssl则端口号应为465
 # app.config['MAIL_PORT'] = 465
 # app.config['MAIL_USE_SSL'] = True
 # # 发送人的邮箱
-# app.config['MAIL_USERNAME'] = "kt_network@qq.com"
+# app.config['MAIL_USERNAME'] = ""
 # # 这里的密码是之前获取的邮箱授权码
-# app.config['MAIL_PASSWORD'] = "tkqcyxgdaisiddjh"
+# app.config['MAIL_PASSWORD'] = ""
 # # 显示发送人的名字
-# app.config['MAIL_DEFAULT_SENDER'] = 'kt_network@qq.com'
+# app.config['MAIL_DEFAULT_SENDER'] = ''
 # mail = Mail(app)
 #
 # # -------------redis配置----------------
