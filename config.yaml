@@ -10,15 +10,15 @@ SQLALCHEMY_ENGINE_OPTIONS:
   pool_pre_ping: true
 
 # 邮箱配置
-MAIL_SERVER: smtp.qq.com
+MAIL_SERVER: 
 MAIL_PORT: 465
 MAIL_USE_SSL: true
-MAIL_USERNAME: kt_network@qq.com
-MAIL_PASSWORD: tkqcyxgdaisiddjh
-MAIL_DEFAULT_SENDER: kt_network@qq.com
+MAIL_USERNAME: 
+MAIL_PASSWORD: 
+MAIL_DEFAULT_SENDER: 
 
 # redis配置
-REDIS_URL: redis://:kunshao@127.0.0.1:6379/0
+REDIS_URL: 
 
 # mqtt配置
 MQTT_BROKER_URL: '192.168.1.150'
